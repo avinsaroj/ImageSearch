@@ -52,6 +52,8 @@ def _conn() -> sqlite3.Connection:
         c.row_factory = sqlite3.Row
         c.execute("PRAGMA journal_mode=WAL")
         c.executescript(_SCHEMA)
+        if "params" not in {r["name"] for r in c.execute("PRAGMA table_info(jobs)")}:
+            c.execute("ALTER TABLE jobs ADD COLUMN params TEXT")  # existing state DBs predate job scopes
         _local.conn = c
     return c
 
@@ -82,8 +84,10 @@ def kv_set(key: str, value) -> None:
 
 
 # jobs
-def enqueue_job(kind: str, trigger: str) -> str | None:
-    """Queue a job for the worker to pick up. Returns None if a live job is already active."""
+def enqueue_job(kind: str, trigger: str, params: dict | None = None) -> str | None:
+    """Queue a job for the worker to pick up. Returns None if a live job is already active.
+
+    params is the sync scope (category/ItemID filters); None keeps the last-used scope."""
     with _tx() as c:
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=STALE_JOB_SECONDS)).isoformat(timespec="seconds")
         c.execute(
@@ -93,8 +97,10 @@ def enqueue_job(kind: str, trigger: str) -> str | None:
                      (cutoff,)).fetchone():
             return None
         job_id = uuid.uuid4().hex
-        c.execute("INSERT INTO jobs(job_id,kind,status,trigger,stage,started_at,heartbeat_at) "
-                  "VALUES(?,?,?,?,?,?,?)", (job_id, kind, "queued", trigger, "queued", now(), now()))
+        c.execute("INSERT INTO jobs(job_id,kind,status,trigger,stage,started_at,heartbeat_at,params) "
+                  "VALUES(?,?,?,?,?,?,?,?)",
+                  (job_id, kind, "queued", trigger, "queued", now(), now(),
+                   None if params is None else json.dumps(params)))
         return job_id
 
 
@@ -131,6 +137,7 @@ def finish_job(job_id: str, status: str, error: str | None = None) -> None:
 def _job_dict(r: sqlite3.Row) -> dict:
     d = dict(r)
     d["counters"] = json.loads(d.get("counters") or "{}")
+    d["params"] = json.loads(d["params"]) if d.get("params") else None
     return d
 
 

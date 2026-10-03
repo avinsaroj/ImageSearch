@@ -33,6 +33,23 @@ def _result(res, err, ok_msg: str) -> None:
         st.success(ok_msg.format(**res))
 
 
+def _scope_form() -> dict:
+    """Filters for a full sync; returns the `scope` body for /sync/full and /sync/preview."""
+    cats, err = call("GET", "/categories")
+    options = [c["code"] for c in cats["categories"]] if cats else []
+    if err:
+        st.warning(f"Category list unavailable: {err}")
+    chosen = st.multiselect("Categories", options, placeholder="All categories")
+    lo, hi = st.columns(2)
+    id_min = lo.number_input("ItemID from", min_value=0, value=0, step=1, help="0 = no lower bound")
+    id_max = hi.number_input("ItemID to", min_value=0, value=0, step=1, help="0 = no upper bound")
+    only_valid = st.checkbox("Only valid products (ItemValidSts = Y)")
+    limit = st.number_input("Test sample: first N products only", min_value=0, value=0, step=10,
+                            help="0 = all matching products. Use e.g. 20 to try the pipeline quickly.")
+    return {"categories": chosen, "item_id_min": int(id_min) or None, "item_id_max": int(id_max) or None,
+            "only_valid": only_valid, "max_products": int(limit) or None}
+
+
 def render() -> None:
     theme.head("Sync admin", "Run and monitor synchronization from SQL Server. Jobs run in the worker, "
                "so closing this page never interrupts them.")
@@ -46,15 +63,28 @@ def render() -> None:
         with a, st.container(border=True):
             st.subheader("Incremental")
             st.caption("New and changed products/images only. Also runs automatically every day.")
+            cur, _err = call("GET", "/sync/scope", admin=True)
+            if cur:
+                st.caption(f"Scope ({cur['source'].replace('_', ' ')}): `{cur['scope'] or 'everything'}`")
             if st.button("Run incremental now", type="primary"):
                 _result(*call("POST", "/sync/incremental", admin=True), "Queued job {job_id}")
         with b, st.container(border=True):
             st.subheader("Full sync / rebuild")
-            st.caption("Embeds every image into a new collection and switches search to it only after "
-                       "validation. The current index keeps serving meanwhile.")
-            ok = st.checkbox("I understand this re-embeds all images and can take hours")
-            if st.button("Start full sync", disabled=not ok):
-                _result(*call("POST", "/sync/full", admin=True, json={"confirm": True}), "Queued job {job_id}")
+            st.caption("Embeds the selected images into a new collection and switches search to it only "
+                       "after validation. The current index keeps serving meanwhile.")
+            scope = _scope_form()
+            sc_cols = st.columns(2)
+            if sc_cols[0].button("Preview size"):
+                res, err = call("POST", "/sync/preview", admin=True, json=scope, timeout=120)
+                if err:
+                    st.error(err)
+                else:
+                    st.info(f"{res['products']:,} products · {res['images']:,} image rows · "
+                            f"{res['files']:,} distinct files to embed")
+            ok = st.checkbox("I understand this rebuilds the index with the selection above")
+            if sc_cols[1].button("Start full sync", type="primary", disabled=not ok):
+                _result(*call("POST", "/sync/full", admin=True, json={"confirm": True, "scope": scope}),
+                        "Queued job {job_id}")
 
     with fail_tab:
         fails, err = call("GET", "/sync/failures", admin=True, params={"limit": 200})

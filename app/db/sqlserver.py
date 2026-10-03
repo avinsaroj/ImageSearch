@@ -70,9 +70,28 @@ def _rows(cur: pyodbc.Cursor) -> list[dict]:
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
-def _item_id_cap() -> int:
-    """Upper ItemID bound for pilot runs (SYNC_ITEM_ID_MAX); 0 means no limit."""
-    return config.SYNC_ITEM_ID_MAX or 9223372036854775807
+_MAX_ID = 9223372036854775807
+
+
+def scope_defaults() -> dict:
+    """Scope used when a job carries none: the SYNC_* environment settings."""
+    return {"item_id_max": config.SYNC_ITEM_ID_MAX or None, "only_valid": config.SYNC_ONLY_VALID}
+
+
+def _scope_where(scope: Optional[dict]) -> tuple[str, list]:
+    """WHERE clause (on aliases i = T_ITEM_MST, cm = T_COMMON_MASTER) and params for a sync scope.
+
+    scope keys: categories, item_id_min, item_id_max, only_valid. None means the environment defaults."""
+    s = scope_defaults() if scope is None else scope
+    clauses = ["i.ItemID >= ?", "i.ItemID <= ?"]
+    args: list = [s.get("item_id_min") or 0, s.get("item_id_max") or _MAX_ID]
+    if s.get("only_valid"):
+        clauses.append("i.ItemValidSts = 'Y'")
+    cats = s.get("categories") or []
+    if cats:
+        clauses.append(f"cm.MstCd IN ({','.join('?' * len(cats))})")
+        args += cats
+    return " AND ".join(clauses), args
 
 
 def image_url(img_path: Optional[str]) -> Optional[str]:
@@ -113,20 +132,42 @@ def count_images() -> int:
         ).fetchone()[0]
 
 
-def iter_products(batch_size: int, after_item_id: int = 0) -> Iterator[list[dict]]:
-    """Keyset-paginated product batches ordered by ItemID (resumable from a checkpoint)."""
+def iter_products(batch_size: int, scope: Optional[dict] = None, after_item_id: int = 0) -> Iterator[list[dict]]:
+    """Keyset-paginated product batches ordered by ItemID (resumable from a checkpoint).
+
+    Honours scope filters and scope["max_products"] (stop after N products, for test runs)."""
     last = after_item_id
-    sql = (f"SELECT TOP (?) {_PRODUCT_COLUMNS} {_PRODUCT_FROM} "
-           "WHERE i.ItemID > ? AND i.ItemID <= ? "
-           + ("AND i.ItemValidSts = 'Y' " if config.SYNC_ONLY_VALID else "")
-           + "ORDER BY i.ItemID")
+    where, args = _scope_where(scope)
+    remaining = (scope or {}).get("max_products") or None
+    sql = f"SELECT TOP (?) {_PRODUCT_COLUMNS} {_PRODUCT_FROM} WHERE i.ItemID > ? AND {where} ORDER BY i.ItemID"
     with connect() as conn:
         while True:
-            batch = _rows(conn.cursor().execute(sql, batch_size, last, _item_id_cap()))
+            size = min(batch_size, remaining) if remaining else batch_size
+            batch = _rows(conn.cursor().execute(sql, size, last, *args))
             if not batch:
                 return
             yield batch
             last = batch[-1]["ItemID"]
+            if remaining:
+                remaining -= len(batch)
+                if remaining <= 0:
+                    return
+
+
+def count_scope(scope: Optional[dict]) -> dict:
+    """How much a sync scope would cover: {products, images, files} (files = distinct image paths)."""
+    where, args = _scope_where(scope)
+    top = (scope or {}).get("max_products") or None
+    items = (f"SELECT {'TOP (?) ' if top else ''}i.ItemID {_PRODUCT_FROM} WHERE {where}"
+             + (" ORDER BY i.ItemID" if top else ""))
+    params = ([top] if top else []) + args
+    with connect() as conn:
+        cur = conn.cursor()
+        products = cur.execute(f"SELECT COUNT(*) FROM ({items}) t", *params).fetchone()[0]
+        images, files = cur.execute(
+            f"SELECT COUNT(*), COUNT(DISTINCT img.ImgPath) FROM dbo.T_IMAGE_MST AS img "
+            f"WHERE img.ImgPath IS NOT NULL AND img.ImgTagRefID IN ({items})", *params).fetchone()
+    return {"products": products, "images": images, "files": files}
 
 
 def fetch_products_by_ids(item_ids: list[int]) -> list[dict]:
@@ -154,16 +195,19 @@ def fetch_images_for_items(item_ids: list[int]) -> list[dict]:
     return rows
 
 
-def iter_all_image_rows(batch_size: int, after_img_id: int = 0) -> Iterator[list[dict]]:
-    """Metadata-only scan of every image row (no downloads) used to detect new/changed images."""
+def iter_all_image_rows(batch_size: int, item_id_min: int = 0, item_id_max: Optional[int] = None,
+                        after_img_id: int = 0) -> Iterator[list[dict]]:
+    """Metadata-only scan of image rows (no downloads) used to detect new/changed images.
+
+    Limited to the ItemID window of the products being synced."""
     last = after_img_id
     sql = (
         f"SELECT TOP (?) {_IMAGE_COLUMNS} FROM dbo.T_IMAGE_MST AS img "
-        "WHERE img.ImgID > ? AND img.ImgTagRefID IS NOT NULL AND img.ImgTagRefID <= ? ORDER BY img.ImgID"
+        "WHERE img.ImgID > ? AND img.ImgTagRefID >= ? AND img.ImgTagRefID <= ? ORDER BY img.ImgID"
     )
     with connect() as conn:
         while True:
-            batch = _rows(conn.cursor().execute(sql, batch_size, last, _item_id_cap()))
+            batch = _rows(conn.cursor().execute(sql, batch_size, last, item_id_min, item_id_max or _MAX_ID))
             if not batch:
                 return
             for r in batch:

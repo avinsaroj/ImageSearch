@@ -3,7 +3,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app import config
 from app.db import sqlserver as db
@@ -21,8 +21,18 @@ def require_admin(x_admin_token: Optional[str] = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="Invalid or missing admin token")
 
 
+class SyncScope(BaseModel):
+    """Which products (and their images) a sync covers. All fields optional; empty means everything."""
+    categories: list[str] = []
+    item_id_min: Optional[int] = Field(default=None, ge=0)
+    item_id_max: Optional[int] = Field(default=None, ge=0)
+    only_valid: bool = False
+    max_products: Optional[int] = Field(default=None, ge=1)  # embed only the first N matching products (test runs)
+
+
 class FullSyncRequest(BaseModel):
     confirm: bool = False  # must be true to build a new index when one already exists
+    scope: Optional[SyncScope] = None  # None keeps the last-used scope (or the SYNC_* env defaults)
 
 
 def _qdrant_status() -> dict:
@@ -82,8 +92,25 @@ def retry_failed(_: None = Depends(require_admin)):
     return {"job_id": job, "requeued_images": n}
 
 
-def _submit(kind: str, trigger: str) -> dict:
-    job_id = state.enqueue_job(kind, trigger)
+@router.get("/scope")
+def current_scope(_: None = Depends(require_admin)):
+    """Scope the next incremental/scheduled job will use: the last full sync's, else the env defaults."""
+    saved = state.kv_get("sync.scope")
+    return {"scope": db.scope_defaults() if saved is None else saved, "source": "env" if saved is None else "last_run"}
+
+
+@router.post("/preview")
+def preview_scope(scope: SyncScope, _: None = Depends(require_admin)):
+    """Count the products/images a scope would embed, without queuing anything."""
+    try:
+        return db.count_scope(scope.model_dump())
+    except Exception as exc:
+        logger.exception("scope preview failed")
+        raise HTTPException(status_code=502, detail=f"SQL Server query failed: {type(exc).__name__}")
+
+
+def _submit(kind: str, trigger: str, scope: Optional[dict] = None) -> dict:
+    job_id = state.enqueue_job(kind, trigger, scope)
     if job_id is None:
         raise HTTPException(status_code=409, detail="A sync job is already running or queued")
     logger.info("queued %s job %s (trigger=%s)", kind, job_id, trigger)
@@ -96,7 +123,7 @@ def start_full(req: FullSyncRequest, _: None = Depends(require_admin)):
     existing = _qdrant_status()
     if existing.get("points") and not req.confirm:
         raise HTTPException(status_code=409, detail="An index already exists; resend with confirm=true to rebuild")
-    return _submit("full", "manual")
+    return _submit("full", "manual", req.scope.model_dump() if req.scope else None)
 
 
 @router.post("/incremental", status_code=202)

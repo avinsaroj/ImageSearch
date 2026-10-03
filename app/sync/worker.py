@@ -4,6 +4,7 @@ Executes queued jobs one at a time and enqueues the daily incremental job at SCH
 in SCHEDULER_TIMEZONE. A missed run (worker was down at the scheduled time) is caught up on start.
 """
 
+import json
 import logging
 import signal
 import time
@@ -27,10 +28,11 @@ BACKOFF_CAP_S = 600
 
 def _run_job(job) -> None:
     job_id, kind = job["job_id"], job["kind"]
+    scope = json.loads(job["params"]) if job["params"] else None
     logger.info("job=%s kind=%s trigger=%s starting", job_id, kind, job["trigger"])
     for attempt in range(1, MAX_JOB_ATTEMPTS + 1):
         try:
-            pipeline.run(job_id, kind)
+            pipeline.run(job_id, kind, scope)
             state.kv_set("last_success_at", state.now())
             state.finish_job(job_id, "succeeded")
             logger.info("job=%s succeeded", job_id)

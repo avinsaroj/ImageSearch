@@ -129,11 +129,11 @@ def _view_id(v):
 
 
 # phases
-def _scan_catalog(p: Progress, c, collection: str) -> set[int]:
+def _scan_catalog(p: Progress, c, collection: str, scope: dict | None) -> set[int]:
     """Phases 1-3. Returns the set of ItemIDs present in the master."""
     p.stage("scanning products")
     master_ids: set[int] = set()
-    for batch in db.iter_products(config.SYNC_PRODUCT_BATCH):
+    for batch in db.iter_products(config.SYNC_PRODUCT_BATCH, scope):
         _check_stop()
         ids = [r["ItemID"] for r in batch]
         known = state.get_product_fingerprints(ids)
@@ -151,7 +151,8 @@ def _scan_catalog(p: Progress, c, collection: str) -> set[int]:
 
     p.stage("scanning images")
     seen: set[int] = set()
-    for batch in db.iter_all_image_rows(config.SYNC_PRODUCT_BATCH * 5):
+    window = (min(master_ids), max(master_ids)) if master_ids else None  # ItemID window of the synced products
+    for batch in (db.iter_all_image_rows(config.SYNC_PRODUCT_BATCH * 5, *window) if window else ()):
         _check_stop()
         for r in batch:
             item_id, img_id = int(r["ItemID"]), int(r["ImgID"])  # SQLite keys are ints; keep `seen` comparable
@@ -292,10 +293,14 @@ def _process_pending(p: Progress, c, collection: str, force: bool) -> None:
         pool.shutdown(wait=False, cancel_futures=True)
 
 
-def run(job_id: str, kind: str) -> None:
+def run(job_id: str, kind: str, scope: dict | None = None) -> None:
     """Execute a sync job. kind: 'incremental' | 'full' (full = rebuild into a new collection + alias swap)."""
     p = Progress(job_id)
     c = index.client()
+    if scope is not None:
+        state.kv_set("sync.scope", scope)  # later incremental/scheduled/resumed jobs keep the same scope
+    else:
+        scope = state.kv_get("sync.scope")
     rebuild = kind == "full"
     if rebuild:
         target = state.kv_get("rebuild.target")
@@ -312,7 +317,7 @@ def run(job_id: str, kind: str) -> None:
     if rebuild and index.resolve_alias(c) is None:
         index.switch_alias(c, target)  # first ever index: serve it while it fills
 
-    _scan_catalog(p, c, target)
+    _scan_catalog(p, c, target, scope)
     _process_pending(p, c, target, force=rebuild)
 
     if rebuild:
