@@ -37,6 +37,11 @@ def _run_job(job) -> None:
             state.finish_job(job_id, "succeeded")
             logger.info("job=%s succeeded", job_id)
             return
+        except pipeline.SyncCancelled:
+            state.finish_job(job_id, "cancelled", "stopped by user")
+            state.clear_cancel(job_id)
+            logger.info("job=%s cancelled by user", job_id)
+            return
         except pipeline.SyncInterrupted:
             state.finish_job(job_id, "interrupted", "stopped by shutdown; will resume")
             state.enqueue_job(kind, "resume")  # picked up after restart

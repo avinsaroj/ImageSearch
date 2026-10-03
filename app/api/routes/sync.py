@@ -96,9 +96,12 @@ def retry_failed(_: None = Depends(require_admin)):
 
 @router.get("/scope")
 def current_scope(_: None = Depends(require_admin)):
-    """Scope the next incremental/scheduled job will use: the last full sync's, else the env defaults."""
-    saved = state.kv_get("sync.scope")
-    return {"scope": db.scope_defaults() if saved is None else saved, "source": "env" if saved is None else "last_run"}
+    """Scopes already added to the index: what the daily/incremental job refreshes."""
+    saved = state.kv_get("sync.scopes")
+    if saved is None:
+        legacy = state.kv_get("sync.scope")
+        saved = [legacy] if legacy else []
+    return {"scopes": saved or [db.scope_defaults()], "source": "saved" if saved else "env"}
 
 
 @router.post("/preview")
@@ -128,6 +131,21 @@ def start_full(req: FullSyncRequest, _: None = Depends(require_admin)):
     return _submit("full", "manual", req.scope.model_dump() if req.scope else None)
 
 
+class IncrementalRequest(BaseModel):
+    scope: Optional[SyncScope] = None  # None refreshes every scope already added; a scope is added to them
+
+
 @router.post("/incremental", status_code=202)
-def start_incremental(_: None = Depends(require_admin)):
-    return _submit("incremental", "manual")
+def start_incremental(req: Optional[IncrementalRequest] = None, _: None = Depends(require_admin)):
+    """Add (or refresh) images in the live index. Never switches the alias; nothing already indexed is dropped."""
+    scope = req.scope.model_dump() if req and req.scope else None
+    return _submit("incremental", "add" if scope else "manual", scope)
+
+
+@router.post("/cancel")
+def cancel_job(_: None = Depends(require_admin)):
+    """Stop the active job at its next checkpoint (a queued job is cancelled immediately)."""
+    job = state.request_cancel()
+    if job is None:
+        raise HTTPException(status_code=409, detail="No sync job is running")
+    return {"job_id": job["job_id"], "status": "cancelling" if job["status"] == "running" else "cancelled"}

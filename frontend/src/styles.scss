@@ -1,13 +1,18 @@
 :root {
   color-scheme: light dark;
-  --gold: #b8892b;
-  --gold-soft: color-mix(in srgb, var(--gold) 14%, transparent);
-  --bg: #f6f4ef;
+  /* Kisna brand: indigo wordmark (#221361), violet accent, lavender tint; Playfair Display + Lato like kisna.com */
+  --brand: #221361;
+  --accent: #7267f2;
+  --on-brand: #ffffff;
+  --brand-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --bg: #f9f9fb;
   --surface: #ffffff;
-  --surface-2: #faf8f3;
-  --text: #1f1d1a;
-  --muted: #6f6a60;
-  --line: #e4dfd2;
+  --surface-2: #f4f3fa;
+  --text: #1e1930;
+  --muted: #6b6784;
+  --line: #e4e1f2;
+  --font-body: 'Lato', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-head: 'Playfair Display', Georgia, 'Times New Roman', serif;
   --ok: #2e7d4f;
   --warn: #b26a00;
   --bad: #c0392b;
@@ -19,13 +24,14 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --gold: #d6a84a;
-    --bg: #14130f;
-    --surface: #1d1b16;
-    --surface-2: #24211b;
-    --text: #f2eee4;
-    --muted: #a39d8e;
-    --line: #38342a;
+    --brand: #a9a2fb;
+    --on-brand: #14112a;
+    --bg: #100e1f;
+    --surface: #1a1730;
+    --surface-2: #221f3d;
+    --text: #f3f2fb;
+    --muted: #a7a3c4;
+    --line: #322e55;
     --ok: #5cc48a;
     --warn: #e0a040;
     --bad: #ef7a6b;
@@ -41,13 +47,13 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font: 15px/1.5 var(--font-body);
   -webkit-font-smoothing: antialiased;
 }
 
-h1, h2, h3 { margin: 0; line-height: 1.2; letter-spacing: -0.01em; }
+h1, h2, h3 { margin: 0; line-height: 1.2; font-family: var(--font-head); font-weight: 600; letter-spacing: 0; }
 p { margin: 0; }
-a { color: var(--gold); }
+a { color: var(--brand); }
 img { max-width: 100%; display: block; }
 
 .page { max-width: 1280px; margin: 0 auto; padding: 24px clamp(14px, 3vw, 32px) 48px; display: grid; gap: 20px; }
@@ -70,12 +76,12 @@ img { max-width: 100%; display: block; }
   min-height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line);
   background: var(--surface-2); color: var(--text); font: inherit; font-weight: 600; cursor: pointer;
   text-decoration: none; transition: background 0.15s, border-color 0.15s, transform 0.05s;
-  &:hover:not(:disabled) { border-color: var(--gold); }
+  &:hover:not(:disabled) { border-color: var(--brand); }
   &:active:not(:disabled) { transform: translateY(1px); }
   &:disabled { opacity: 0.5; cursor: not-allowed; }
-  &:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
-  &.primary { background: var(--gold); border-color: var(--gold); color: #1a1405; }
-  &.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--gold) 88%, white); }
+  &:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+  &.primary { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+  &.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--brand) 88%, white); }
   &.ghost { background: transparent; }
   &.danger { color: var(--bad); }
 }
@@ -86,16 +92,16 @@ img { max-width: 100%; display: block; }
 input[type='text'], input[type='password'], input[type='number'], select {
   width: 100%; min-height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line);
   background: var(--surface-2); color: var(--text); font: inherit;
-  &:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
+  &:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 }
-input[type='range'] { width: 100%; accent-color: var(--gold); }
+input[type='range'] { width: 100%; accent-color: var(--brand); }
 
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface-2); width: 100%; }
 .seg button {
   flex: 1; min-height: 38px; padding: 0 10px; border: 0; background: transparent; color: var(--muted);
   font: inherit; font-weight: 600; cursor: pointer;
-  &[aria-pressed='true'] { background: var(--gold-soft); color: var(--gold); box-shadow: inset 0 -2px 0 var(--gold); }
-  &:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
+  &[aria-pressed='true'] { background: var(--brand-soft); color: var(--brand); box-shadow: inset 0 -2px 0 var(--brand); }
+  &:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
 }
 
 /* chips + states */
@@ -110,11 +116,11 @@ input[type='range'] { width: 100%; accent-color: var(--gold); }
 .alert.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
 .alert.info { color: var(--text); }
 
-.spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--gold); animation: spin 0.7s linear infinite; }
+.spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--brand); animation: spin 0.7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .progress { height: 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); overflow: hidden; }
-.progress > i { display: block; height: 100%; background: linear-gradient(90deg, var(--gold), color-mix(in srgb, var(--gold) 60%, white)); transition: width 0.4s; }
+.progress > i { display: block; height: 100%; background: linear-gradient(90deg, var(--brand), color-mix(in srgb, var(--brand) 60%, white)); transition: width 0.4s; }
 
 .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
 table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }

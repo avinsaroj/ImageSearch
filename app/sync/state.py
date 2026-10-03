@@ -104,6 +104,27 @@ def enqueue_job(kind: str, trigger: str, params: dict | None = None) -> str | No
         return job_id
 
 
+def request_cancel() -> dict | None:
+    """Stop the active job. A queued job is cancelled at once; a running one is flagged and stops at its
+    next checkpoint (the pipeline polls cancel_requested). Returns the job, or None if nothing is active."""
+    job = current_job()
+    if job is None:
+        return None
+    if job["status"] == "queued":
+        finish_job(job["job_id"], "cancelled", "cancelled before start")
+    else:
+        kv_set(f"cancel.{job['job_id']}", True)
+    return job
+
+
+def cancel_requested(job_id: str) -> bool:
+    return bool(kv_get(f"cancel.{job_id}"))
+
+
+def clear_cancel(job_id: str) -> None:
+    _conn().execute("DELETE FROM kv WHERE key=?", (f"cancel.{job_id}",))
+
+
 def recover_running_jobs() -> int:
     """On worker start every 'running' job is orphaned; re-queue it so it resumes from persisted state."""
     return _conn().execute(

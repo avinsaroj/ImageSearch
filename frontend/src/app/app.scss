@@ -5,11 +5,23 @@
   padding: 20px 14px; background: var(--surface); border-right: 1px solid var(--line);
 }
 
+.logo { height: 26px; width: auto; display: block; }
+/* the wordmark is dark indigo on transparent: turn it white on the dark theme */
+@media (prefers-color-scheme: dark) { .logo { filter: brightness(0) invert(1); } }
+
 .brand {
-  display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text);
-  font-weight: 700; line-height: 1.15; padding: 0 6px;
-  small { display: block; font-weight: 500; color: var(--muted); font-size: 0.75rem; }
-  .gem { font-size: 1.7rem; }
+  display: grid; gap: 8px; text-decoration: none; color: var(--text); padding: 4px 6px 0;
+  .logo { height: 30px; justify-self: start; }
+  .product { font-family: var(--font-head); font-weight: 600; font-size: 1.05rem; line-height: 1.2; }
+  small { display: block; font-family: var(--font-body); font-weight: 400; color: var(--muted); font-size: 0.78rem; margin-top: 2px; }
+}
+
+.topbar {
+  display: none; align-items: center; gap: 10px; position: sticky; top: 0; z-index: 15; min-height: 52px;
+  padding: 0 14px; padding-top: env(safe-area-inset-top); background: var(--surface); border-bottom: 1px solid var(--line);
+  .product { font-family: var(--font-head); font-weight: 600; color: var(--muted); border-left: 1px solid var(--line); padding-left: 10px; }
+  .dot { margin-left: auto; width: 9px; height: 9px; border-radius: 50%; background: var(--muted);
+    &.on { background: var(--ok); } &.off { background: var(--bad); } }
 }
 
 nav { display: grid; gap: 4px; }
@@ -17,8 +29,8 @@ nav a {
   display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 0 12px; border-radius: 10px;
   color: var(--muted); text-decoration: none; font-weight: 600;
   &:hover { background: var(--surface-2); color: var(--text); }
-  &.active { background: var(--gold-soft); color: var(--gold); }
-  &:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+  &.active { background: var(--brand-soft); color: var(--brand); }
+  &:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
   .ico { font-size: 1.15rem; width: 1.5rem; text-align: center; }
 }
 
@@ -40,6 +52,7 @@ nav a {
     padding: 0 6px env(safe-area-inset-bottom); border-right: 0; border-top: 1px solid var(--line);
   }
   .brand, .foot { display: none; }
+  .topbar { display: flex; }
   nav { grid-auto-flow: column; grid-auto-columns: 1fr; width: 100%; gap: 2px; }
   nav a { flex-direction: column; justify-content: center; gap: 2px; min-height: var(--bar-h); font-size: 0.72rem; padding: 0; }
 }

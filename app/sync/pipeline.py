@@ -33,6 +33,13 @@ class SyncInterrupted(Exception):
     pass
 
 
+class SyncCancelled(Exception):
+    """Raised at a checkpoint when the user stopped the job from the UI/API."""
+
+
+_active_job: str | None = None  # job being executed (the worker runs one at a time)
+
+
 @lru_cache(maxsize=1)
 def get_embedder():
     from app.ingestion.embedder import Embedder  # heavy import, keep lazy
@@ -42,6 +49,8 @@ def get_embedder():
 def _check_stop() -> None:
     if STOP.is_set():
         raise SyncInterrupted("shutdown requested")
+    if _active_job and state.cancel_requested(_active_job):
+        raise SyncCancelled("cancelled by user")
 
 
 def _fingerprint(*parts) -> str:
@@ -129,25 +138,31 @@ def _view_id(v):
 
 
 # phases
-def _scan_catalog(p: Progress, c, collection: str, scope: dict | None) -> set[int]:
-    """Phases 1-3. Returns the set of ItemIDs present in the master."""
+def _scan_catalog(p: Progress, c, collection: str, scopes: list, rebuild: bool) -> set[int]:
+    """Phases 1-3 over the union of `scopes`. Returns the set of ItemIDs present in the master.
+
+    A rebuild only holds its own scope, so everything outside it is dropped from the tracking state.
+    An additive run (incremental) keeps the one shared collection: images outside the scanned scopes
+    are left untouched, and only images that no longer exist in SQL Server are deactivated."""
     p.stage("scanning products")
     master_ids: set[int] = set()
-    for batch in db.iter_products(config.SYNC_PRODUCT_BATCH, scope):
-        _check_stop()
-        ids = [r["ItemID"] for r in batch]
-        known = state.get_product_fingerprints(ids)
-        for prod in batch:
-            master_ids.add(int(prod["ItemID"]))
-            fp = _product_fp(prod)
-            old = known.get(prod["ItemID"])
-            if old != fp:
-                if old is not None:  # existing product with changed metadata -> refresh payload only
-                    index.update_product_payload(c, collection, prod)
-                    p.c["products_changed"] += 1
-                state.set_product_fingerprint(prod["ItemID"], fp)
-        p.c["products_scanned"] += len(batch)
-        p.tick()
+    for scope in scopes:
+        for batch in db.iter_products(config.SYNC_PRODUCT_BATCH, scope):
+            _check_stop()
+            batch = [r for r in batch if int(r["ItemID"]) not in master_ids]  # already seen via another scope
+            ids = [r["ItemID"] for r in batch]
+            known = state.get_product_fingerprints(ids)
+            for prod in batch:
+                master_ids.add(int(prod["ItemID"]))
+                fp = _product_fp(prod)
+                old = known.get(prod["ItemID"])
+                if old != fp:
+                    if old is not None:  # existing product with changed metadata -> refresh payload only
+                        index.update_product_payload(c, collection, prod)
+                        p.c["products_changed"] += 1
+                    state.set_product_fingerprint(prod["ItemID"], fp)
+            p.c["products_scanned"] += len(batch)
+            p.tick()
 
     p.stage("scanning images")
     seen: set[int] = set()
@@ -166,6 +181,11 @@ def _scan_catalog(p: Progress, c, collection: str, scope: dict | None) -> set[in
 
     p.stage("applying deletion policy")
     gone_rows = state.images_not_seen_ids(seen)
+    if not rebuild and gone_rows:
+        # Outside the scanned scopes is not "deleted": keep those images searchable and only drop the
+        # ones whose row is really gone from SQL Server.
+        alive = db.existing_image_ids([r["img_id"] for r in gone_rows])
+        gone_rows = [r for r in gone_rows if r["img_id"] not in alive]
     # Only images that were actually indexed have a point to deactivate/delete.
     indexed_gone = [r["img_id"] for r in gone_rows if r["status"] == "indexed"]
     for i in range(0, len(indexed_gone), 500):
@@ -209,6 +229,11 @@ def _process_pending(p: Progress, c, collection: str, force: bool) -> None:
             products = {pr["ItemID"]: pr for pr in db.fetch_products_by_ids(sorted({r["item_id"] for r in rows}))}
             # Many image rows point at the same file: reuse stored vectors instead of re-downloading/embedding.
             produced = _donor_vectors(c, collection, rows)  # url -> (vectors, content_hash, etag)
+            # The tracking state is not per collection: an image can be marked indexed while its point lives in
+            # another collection. Only trust the "unchanged" shortcuts when the point is really in this one.
+            have = {str(pt.id) for pt in c.retrieve(
+                collection, ids=[index.point_id(r["img_id"]) for r in rows], with_payload=False, with_vectors=False)}
+            needs_embed = lambda r: force or index.point_id(r["img_id"]) not in have  # noqa: E731
             failed_urls: dict[str, str] = {}
             leaders, shared, first_seen = [], [], set()
             for r in rows:
@@ -219,7 +244,7 @@ def _process_pending(p: Progress, c, collection: str, force: bool) -> None:
                     leaders.append(r)
                     if u:
                         first_seen.add(u)
-            fetched = list(pool.map(lambda r: _fetch(r, force), leaders))
+            fetched = list(pool.map(lambda r: _fetch(r, needs_embed(r)), leaders))
             points = []
             for row, res in fetched:
                 p.c["processed"] += 1
@@ -243,7 +268,7 @@ def _process_pending(p: Progress, c, collection: str, force: bool) -> None:
                         p.c["skipped"] += 1
                         continue
                     chash = hashlib.sha256(data).hexdigest()
-                    if (not force and row["content_hash"] == chash
+                    if (not needs_embed(row) and row["content_hash"] == chash
                             and row["model_version"] == config.EMBEDDING_MODEL_VERSION):
                         c.set_payload(collection, {"ImageURL": row["url"], "ImgViewID": img_meta["ImgViewID"],
                                                    "is_active": True}, points=[index.point_id(img_id)])
@@ -293,15 +318,44 @@ def _process_pending(p: Progress, c, collection: str, force: bool) -> None:
         pool.shutdown(wait=False, cancel_futures=True)
 
 
+def resolve_scopes(scope: dict | None, rebuild: bool) -> list:
+    """Scopes this job scans, persisting the list for later runs.
+
+    The saved list is the union of everything added to the index; the daily job refreshes all of it.
+    A job carrying a scope adds it (incremental) or replaces the list (full rebuild); one without keeps it.
+    [None] means no filters recorded yet, i.e. the SYNC_* environment defaults."""
+    saved = state.kv_get("sync.scopes")
+    if saved is None:  # state written before scopes were a list
+        legacy = state.kv_get("sync.scope")
+        saved = [legacy] if legacy else []
+    scopes = ([scope] if rebuild else saved + ([scope] if scope not in saved else [])) if scope is not None else saved
+    if scopes != state.kv_get("sync.scopes"):
+        state.kv_set("sync.scopes", scopes)
+    return scopes or [None]
+
+
 def run(job_id: str, kind: str, scope: dict | None = None) -> None:
-    """Execute a sync job. kind: 'incremental' | 'full' (full = rebuild into a new collection + alias swap)."""
+    """Execute a sync job.
+
+    kind 'incremental' adds/refreshes images in the live collection (no alias change, nothing outside the
+    scanned scopes is deactivated). kind 'full' rebuilds from scratch into a new collection + alias swap."""
+    global _active_job
+    _active_job = job_id
+    rebuild = kind == "full"
+    try:
+        _run(job_id, rebuild, scope)
+    except SyncCancelled:
+        if rebuild:
+            state.kv_set("rebuild.target", None)  # abandon the half-built collection; next rebuild starts fresh
+        raise
+    finally:
+        _active_job = None
+
+
+def _run(job_id: str, rebuild: bool, scope: dict | None) -> None:
     p = Progress(job_id)
     c = index.client()
-    if scope is not None:
-        state.kv_set("sync.scope", scope)  # later incremental/scheduled/resumed jobs keep the same scope
-    else:
-        scope = state.kv_get("sync.scope")
-    rebuild = kind == "full"
+    scopes = resolve_scopes(scope, rebuild)
     if rebuild:
         target = state.kv_get("rebuild.target")
         if not target:  # fresh rebuild (an interrupted one resumes into the same target)
@@ -317,7 +371,7 @@ def run(job_id: str, kind: str, scope: dict | None = None) -> None:
     if rebuild and index.resolve_alias(c) is None:
         index.switch_alias(c, target)  # first ever index: serve it while it fills
 
-    _scan_catalog(p, c, target, scope)
+    _scan_catalog(p, c, target, scopes, rebuild)
     _process_pending(p, c, target, force=rebuild)
 
     if rebuild:

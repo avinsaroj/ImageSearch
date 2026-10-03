@@ -4,11 +4,11 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { Observable, Subject, catchError, interval, map, merge, of, startWith, switchMap } from 'rxjs';
 
 import { Api, errorMessage } from '../../core/api';
-import { FailedImage, Job, ScopePreview, SyncScope, SyncStatus } from '../../core/models';
+import { FailedImage, Job, ScopeList, ScopePreview, SyncScope, SyncStatus } from '../../core/models';
 import { TokenBox } from '../../shared/token-box';
 
 type Tab = 'failed' | 'history';
-type Busy = 'preview' | 'full' | 'incremental' | 'retry';
+type Busy = 'preview' | 'add' | 'full' | 'incremental' | 'retry' | 'cancel';
 type Flag = 'plain_gold' | 'solitaire' | 'valid' | 'franchise';
 
 const EMPTY_SCOPE: SyncScope = {
@@ -47,7 +47,7 @@ export class SyncPage {
   protected readonly tab = signal<Tab>('failed');
   protected readonly failures = signal<FailedImage[] | null>(null);
   protected readonly history = signal<Job[] | null>(null);
-  protected readonly lastScope = signal<{ scope: Partial<SyncScope> | null; source: string } | null>(null);
+  protected readonly lastScope = signal<ScopeList | null>(null);
 
   protected readonly job = computed(() => this.status()?.current_job ?? null);
   protected readonly progress = computed(() => {
@@ -55,7 +55,7 @@ export class SyncPage {
     const total = c?.to_process ?? 0;
     return total ? Math.min(100, ((c?.processed ?? 0) / total) * 100) : 0;
   });
-  protected readonly scopeSummary = computed(() => this.describe(this.lastScope()?.scope ?? null));
+  protected readonly scopeList = computed(() => (this.lastScope()?.scopes ?? []).map((s) => this.describe(s)));
 
   constructor() {
     merge(interval(3000), this.refresh$).pipe(
@@ -123,11 +123,21 @@ export class SyncPage {
     this.run('preview', this.api.preview(this.scope()), (p) => this.preview.set(p));
   }
 
+  protected startAdd(): void {
+    this.run('add', this.api.startAdd(this.scope()), (r) =>
+      this.notice.set({ kind: 'ok', text: `Adding to the index (job ${r.job_id.slice(0, 8)}). Search keeps working while it runs.` }));
+  }
+
   protected startFull(): void {
     this.run('full', this.api.startFull(this.scope()), (r) => {
-      this.notice.set({ kind: 'ok', text: `Full sync queued (job ${r.job_id.slice(0, 8)}).` });
+      this.notice.set({ kind: 'ok', text: `Rebuild queued (job ${r.job_id.slice(0, 8)}).` });
       this.confirm.set(false);
     });
+  }
+
+  protected cancelJob(): void {
+    this.run('cancel', this.api.cancel(), (r) =>
+      this.notice.set({ kind: 'ok', text: r.status === 'cancelling' ? 'Stopping… the job ends at its next checkpoint.' : 'Job cancelled.' }));
   }
 
   protected startIncremental(): void {

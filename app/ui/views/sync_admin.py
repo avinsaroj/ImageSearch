@@ -65,7 +65,7 @@ def render() -> None:
             st.caption("New and changed products/images only. Also runs automatically every day.")
             cur, _err = call("GET", "/sync/scope", admin=True)
             if cur:
-                st.caption(f"Scope ({cur['source'].replace('_', ' ')}): `{cur['scope'] or 'everything'}`")
+                st.caption(f"Scopes added ({cur['source']}): `{cur['scopes'] or 'everything'}`")
             if st.button("Run incremental now", type="primary"):
                 _result(*call("POST", "/sync/incremental", admin=True), "Queued job {job_id}")
         with b, st.container(border=True):

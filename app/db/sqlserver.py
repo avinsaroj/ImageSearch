@@ -207,6 +207,19 @@ def fetch_images_for_items(item_ids: list[int]) -> list[dict]:
     return rows
 
 
+def existing_image_ids(img_ids: list[int]) -> set[int]:
+    """Subset of img_ids that still exist in T_IMAGE_MST (primary-key lookups, 1000 per round trip)."""
+    found: set[int] = set()
+    with connect() as conn:
+        cur = conn.cursor()
+        for i in range(0, len(img_ids), 1000):
+            chunk = img_ids[i:i + 1000]
+            marks = ",".join("?" * len(chunk))
+            found.update(int(r[0]) for r in cur.execute(
+                f"SELECT ImgID FROM dbo.T_IMAGE_MST WHERE ImgID IN ({marks})", *chunk).fetchall())
+    return found
+
+
 def iter_all_image_rows(batch_size: int, item_id_min: int = 0, item_id_max: Optional[int] = None,
                         after_img_id: int = 0) -> Iterator[list[dict]]:
     """Metadata-only scan of image rows (no downloads) used to detect new/changed images.

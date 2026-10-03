@@ -52,6 +52,10 @@
               }
             ],
             "styles": [
+              "node_modules/@fontsource/lato/latin-400.css",
+              "node_modules/@fontsource/lato/latin-700.css",
+              "node_modules/@fontsource/playfair-display/latin-600.css",
+              "node_modules/@fontsource/playfair-display/latin-700.css",
               "src/styles.scss"
             ]
           },

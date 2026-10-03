@@ -72,6 +72,12 @@ export interface SyncScope {
   max_products: number | null;
 }
 
+/** Scopes already added to the index; the daily/refresh job re-scans all of them. */
+export interface ScopeList {
+  scopes: Partial<SyncScope>[];
+  source: 'saved' | 'env';
+}
+
 export interface Job {
   job_id: string;
   kind: 'full' | 'incremental';

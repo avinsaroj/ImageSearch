@@ -3,7 +3,7 @@ import { inject, Injectable } from '@angular/core';
 import { catchError, map, Observable, of } from 'rxjs';
 
 import {
-  Categories, FailedImage, Job, ScopePreview, SearchParams, SearchResponse, SyncScope, SyncStatus,
+  Categories, FailedImage, Job, ScopeList, ScopePreview, SearchParams, SearchResponse, SyncScope, SyncStatus,
 } from './models';
 
 /** Base path of the FastAPI service: nginx proxies /api in production, proxy.conf.json in `ng serve`. */
@@ -46,8 +46,17 @@ export class Api {
     return this.http.get<SyncStatus>(`${BASE}/sync/status`);
   }
 
-  scope(): Observable<{ scope: Partial<SyncScope> | null; source: string }> {
-    return this.http.get<{ scope: Partial<SyncScope> | null; source: string }>(`${BASE}/sync/scope`);
+  scope(): Observable<ScopeList> {
+    return this.http.get<ScopeList>(`${BASE}/sync/scope`);
+  }
+
+  /** Add a scope's images to the live index (no alias switch, nothing already indexed is dropped). */
+  startAdd(scope: SyncScope): Observable<{ job_id: string }> {
+    return this.http.post<{ job_id: string }>(`${BASE}/sync/incremental`, { scope });
+  }
+
+  cancel(): Observable<{ job_id: string; status: string }> {
+    return this.http.post<{ job_id: string; status: string }>(`${BASE}/sync/cancel`, {});
   }
 
   preview(scope: SyncScope): Observable<ScopePreview> {

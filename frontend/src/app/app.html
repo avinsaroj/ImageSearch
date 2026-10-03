@@ -1,8 +1,14 @@
+<header class="topbar">
+  <a routerLink="/search" aria-label="Kisna Image Search"><img class="logo" src="kisna-logo.png" alt="Kisna" width="345" height="69" /></a>
+  <span class="product">Image Search</span>
+  <i class="dot" [class.on]="online() === true" [class.off]="online() === false" [attr.title]="online() ? 'API connected' : 'API unreachable'"></i>
+</header>
+
 <div class="shell">
   <aside class="side">
     <a class="brand" routerLink="/search">
-      <span class="gem">💎</span>
-      <span>Jewellery Search<small>Visual similarity</small></span>
+      <img class="logo" src="kisna-logo.png" alt="Kisna" width="345" height="69" />
+      <span class="product">Image Search<small>Find similar jewellery</small></span>
     </a>
 
     <nav aria-label="Main">

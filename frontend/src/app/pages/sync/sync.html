@@ -16,11 +16,16 @@
       @if (job(); as j) {
         <div class="row">
           <div>
-            <strong>{{ j.kind === 'full' ? 'Full' : 'Incremental' }} sync</strong>
+            <strong>{{ j.kind === 'full' ? 'Rebuild' : j.trigger === 'add' ? 'Add to index' : 'Refresh index' }}</strong>
             <span class="mono muted"> · {{ j.job_id.slice(0, 8) }}</span>
             <span [class]="'chip ' + statusClass(j.status)"> {{ j.status }}</span>
           </div>
-          <span class="muted small">{{ j.stage }}</span>
+          <div class="live-actions">
+            <span class="muted small">{{ j.stage }}</span>
+            <button class="btn danger" type="button" [disabled]="busy() !== null" (click)="cancelJob()">
+              @if (busy() === 'cancel') { <span class="spinner"></span> } ⏹ Stop job
+            </button>
+          </div>
         </div>
         <div class="progress" role="progressbar" [attr.aria-valuenow]="progress()" aria-valuemin="0" aria-valuemax="100"><i [style.width.%]="progress()"></i></div>
         <p class="muted small">Images processed {{ (j.counters.processed ?? 0) | number }} / {{ (j.counters.to_process ?? 0) | number }}</p>
@@ -40,25 +45,11 @@
   @if (notice(); as n) { <div class="alert" [class.ok]="n.kind === 'ok'" [class.error]="n.kind === 'error'" role="status">{{ n.text }}</div> }
 
   <div class="grid cols-2 run">
-    <!-- incremental -->
+    <!-- add to index -->
     <section class="card stack">
       <div>
-        <h2>Incremental</h2>
-        <p class="muted small">New and changed products/images only. Also runs automatically every day at {{ status()?.scheduler?.daily_at ?? '…' }}.</p>
-      </div>
-      @if (lastScope()) {
-        <p class="small">Scope ({{ lastScope()!.source.replace('_', ' ') }}): <span class="mono">{{ scopeSummary() }}</span></p>
-      }
-      <div><button class="btn primary" type="button" [disabled]="busy() !== null || needsToken()" (click)="startIncremental()">
-        @if (busy() === 'incremental') { <span class="spinner"></span> } Run incremental now
-      </button></div>
-    </section>
-
-    <!-- full -->
-    <section class="card stack">
-      <div>
-        <h2>Full sync / rebuild</h2>
-        <p class="muted small">Embeds the selected images into a new collection and switches search to it only after validation. The current index keeps serving meanwhile.</p>
+        <h2>Add to index</h2>
+        <p class="muted small">Embeds the selected products into the one live index. Everything already indexed stays searchable, search never switches collections, and the Search page narrows results by its own filters.</p>
       </div>
 
       <div class="field">
@@ -107,10 +98,36 @@
         <div class="alert info"><b>{{ p.products | number }}</b> products · <b>{{ p.images | number }}</b> image rows · <b>{{ p.files | number }}</b> distinct files to embed</div>
       }
 
-      <label class="check"><input type="checkbox" [checked]="confirm()" (change)="confirm.set($any($event.target).checked)" /> I understand this rebuilds the index with the selection above</label>
-      <div><button class="btn primary" type="button" [disabled]="!confirm() || busy() !== null || needsToken()" (click)="startFull()">
-        @if (busy() === 'full') { <span class="spinner"></span> } Start full sync
+      <div><button class="btn primary" type="button" [disabled]="busy() !== null || needsToken() || !!job()" (click)="startAdd()">
+        @if (busy() === 'add') { <span class="spinner"></span> } Add to index
       </button></div>
+      @if (job()) { <p class="muted small">A job is running. Stop it first or wait for it to finish.</p> }
+    </section>
+
+    <!-- refresh + advanced -->
+    <section class="card stack">
+      <div>
+        <h2>Refresh index</h2>
+        <p class="muted small">Re-scans everything added so far for new and changed images, and deactivates images deleted in SQL Server. Also runs automatically every day at {{ status()?.scheduler?.daily_at ?? '…' }}.</p>
+      </div>
+      <div>
+        <span class="label">Added so far</span>
+        <ul class="scopes">
+          @for (s of scopeList(); track $index) { <li class="mono">{{ s }}</li> } @empty { <li class="muted">Nothing recorded yet.</li> }
+        </ul>
+      </div>
+      <div><button class="btn" type="button" [disabled]="busy() !== null || needsToken() || !!job()" (click)="startIncremental()">
+        @if (busy() === 'incremental') { <span class="spinner"></span> } Refresh now
+      </button></div>
+
+      <details class="advanced">
+        <summary>Advanced: rebuild from scratch</summary>
+        <p class="muted small">Builds a brand-new index containing <b>only</b> the selection on the left, then switches search to it. Everything else is dropped from search. Only use this to start over, for example after changing the embedding model.</p>
+        <label class="check"><input type="checkbox" [checked]="confirm()" (change)="confirm.set($any($event.target).checked)" /> I understand this replaces the whole index with the selection</label>
+        <div><button class="btn danger" type="button" [disabled]="!confirm() || busy() !== null || needsToken() || !!job()" (click)="startFull()">
+          @if (busy() === 'full') { <span class="spinner"></span> } Rebuild index
+        </button></div>
+      </details>
     </section>
   </div>
 
