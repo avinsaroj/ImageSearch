@@ -59,6 +59,8 @@ SYNC_EMBED_BATCH: int = int(os.getenv("SYNC_EMBED_BATCH", "16"))
 SYNC_DOWNLOAD_CONCURRENCY: int = int(os.getenv("SYNC_DOWNLOAD_CONCURRENCY", "8"))
 SYNC_DOWNLOAD_TIMEOUT_S: float = float(os.getenv("SYNC_DOWNLOAD_TIMEOUT_S", "20"))
 SYNC_DOWNLOAD_RETRIES: int = int(os.getenv("SYNC_DOWNLOAD_RETRIES", "3"))
+SYNC_ITEM_ID_MAX: int = int(os.getenv("SYNC_ITEM_ID_MAX", "0"))  # pilot limit: only ItemID <= N (0 = all)
+SYNC_ONLY_VALID: bool = _env_bool("SYNC_ONLY_VALID", False)  # index only products with ItemValidSts = 'Y'
 SYNC_MAX_IMAGE_MB: int = int(os.getenv("SYNC_MAX_IMAGE_MB", "20"))
 SYNC_MAX_ATTEMPTS: int = int(os.getenv("SYNC_MAX_ATTEMPTS", "5"))
 SYNC_DELETION_POLICY: str = os.getenv("SYNC_DELETION_POLICY", "mark_invalid")  # mark_invalid | delete

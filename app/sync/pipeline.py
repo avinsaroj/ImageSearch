@@ -16,6 +16,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 
+import numpy as np
 import requests
 from PIL import Image
 
@@ -57,7 +58,7 @@ class Progress:
     def __init__(self, job_id: str):
         self.job_id = job_id
         self.c = {"products_scanned": 0, "products_changed": 0, "images_scanned": 0, "images_registered": 0,
-                  "images_removed": 0, "to_process": 0, "processed": 0, "indexed": 0, "skipped": 0, "failed": 0}
+                  "images_removed": 0, "to_process": 0, "processed": 0, "indexed": 0, "reused": 0, "skipped": 0, "failed": 0}
         self._last = 0.0
 
     def stage(self, name: str) -> None:
@@ -175,6 +176,21 @@ def _scan_catalog(p: Progress, c, collection: str) -> set[int]:
     return master_ids
 
 
+def _donor_vectors(c, collection: str, rows) -> dict:
+    """Vectors of already-indexed images that share a URL with a pending row: {url: (vectors, hash, etag)}."""
+    donors = state.indexed_by_url([r["url"] for r in rows if r["url"]], config.EMBEDDING_MODEL_VERSION)
+    if not donors:
+        return {}
+    recs = c.retrieve(collection, ids=[index.point_id(d["img_id"]) for d in donors.values()], with_vectors=True)
+    by_id = {str(rec.id): rec.vector for rec in recs}
+    out = {}
+    for url, d in donors.items():
+        vec = by_id.get(index.point_id(d["img_id"]))
+        if vec and index.CLIP_VEC in vec and index.DINO_VEC in vec:
+            out[url] = ({k: np.asarray(v, dtype="float32") for k, v in vec.items()}, d["content_hash"], d["etag"])
+    return out
+
+
 def _process_pending(p: Progress, c, collection: str, force: bool) -> None:
     p.stage("embedding images")
     embedder = get_embedder()
@@ -188,7 +204,19 @@ def _process_pending(p: Progress, c, collection: str, force: bool) -> None:
             if not rows:
                 break
             products = {pr["ItemID"]: pr for pr in db.fetch_products_by_ids(sorted({r["item_id"] for r in rows}))}
-            fetched = list(pool.map(lambda r: _fetch(r, force), rows))
+            # Many image rows point at the same file: reuse stored vectors instead of re-downloading/embedding.
+            produced = _donor_vectors(c, collection, rows)  # url -> (vectors, content_hash, etag)
+            failed_urls: dict[str, str] = {}
+            leaders, shared, first_seen = [], [], set()
+            for r in rows:
+                u = r["url"]
+                if u and (u in produced or u in first_seen):
+                    shared.append(r)
+                else:
+                    leaders.append(r)
+                    if u:
+                        first_seen.add(u)
+            fetched = list(pool.map(lambda r: _fetch(r, force), leaders))
             points = []
             for row, res in fetched:
                 p.c["processed"] += 1
@@ -198,6 +226,7 @@ def _process_pending(p: Progress, c, collection: str, force: bool) -> None:
                     state.mark_image(img_id, "removed"); p.c["skipped"] += 1
                     continue
                 if isinstance(res, Exception):
+                    failed_urls[row["url"]] = str(res)
                     state.mark_image(img_id, "failed", error=str(res)); p.c["failed"] += 1
                     continue
                 data, etag, not_modified = res
@@ -225,9 +254,26 @@ def _process_pending(p: Progress, c, collection: str, force: bool) -> None:
                     }
                     points.append((img_id, etag, chash, index.make_point(
                         {**img_meta, "ImgID": img_id}, prod, vectors, chash)))
+                    produced[row["url"]] = (vectors, chash, etag)
                 except Exception as exc:
-                    state.mark_image(img_id, "failed", error=f"{type(exc).__name__}: {exc}")
+                    failed_urls[row["url"]] = f"{type(exc).__name__}: {exc}"
+                    state.mark_image(img_id, "failed", error=failed_urls[row["url"]])
                     p.c["failed"] += 1
+            for row in shared:  # duplicates of an already-indexed or just-processed URL
+                u, img_id = row["url"], row["img_id"]
+                prod = products.get(row["item_id"])
+                if prod is None:
+                    state.mark_image(img_id, "removed"); p.c["processed"] += 1; p.c["skipped"] += 1
+                elif u in produced:
+                    vectors, chash, etag = produced[u]
+                    points.append((img_id, etag, chash, index.make_point(
+                        {"ImgID": img_id, "ImageURL": u, "ImgViewID": _view_id(row["view_id"])},
+                        prod, vectors, chash)))
+                    p.c["processed"] += 1; p.c["reused"] += 1
+                elif u in failed_urls:
+                    state.mark_image(img_id, "failed", error=failed_urls[u])
+                    p.c["processed"] += 1; p.c["failed"] += 1
+                # else: the first row with this URL was skipped/unchanged; stays pending and is reused next pass
             if points:
                 try:
                     index.upsert(c, collection, [pt for *_, pt in points])

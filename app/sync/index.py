@@ -19,7 +19,8 @@ from datetime import datetime, timezone
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     CreateAlias, CreateAliasOperation, DeleteAlias, DeleteAliasOperation, Distance, FieldCondition,
-    Filter, FilterSelector, MatchValue, PayloadSchemaType, PointStruct, VectorParams,
+    Filter, FilterSelector, MatchValue, PayloadSchemaType, PointStruct, ScalarQuantization,
+    ScalarQuantizationConfig, ScalarType, VectorParams,
 )
 
 from app import config
@@ -59,9 +60,9 @@ def to_bool(v):
     s = str(v).strip().lower()
     if s in ("1", "y", "yes", "true", "t"):
         return True
-    if s in ("0", "n", "no", "false", "f", ""):
+    if s in ("0", "n", "no", "false", "f"):
         return False
-    return None
+    return None  # blank / unknown stays unknown rather than being guessed as False
 
 
 def product_payload(p: dict) -> dict:
@@ -111,10 +112,13 @@ def resolve_alias(c: QdrantClient) -> str | None:
 def create_collection(c: QdrantClient, name: str) -> None:
     c.create_collection(
         collection_name=name,
+        # Millions of images: keep full-precision vectors on disk and an int8 copy in RAM for fast search.
         vectors_config={
-            CLIP_VEC: VectorParams(size=config.CLIP_EMBED_DIM, distance=Distance.COSINE),
-            DINO_VEC: VectorParams(size=config.DINO_EMBED_DIM, distance=Distance.COSINE),
+            CLIP_VEC: VectorParams(size=config.CLIP_EMBED_DIM, distance=Distance.COSINE, on_disk=True),
+            DINO_VEC: VectorParams(size=config.DINO_EMBED_DIM, distance=Distance.COSINE, on_disk=True),
         },
+        quantization_config=ScalarQuantization(
+            scalar=ScalarQuantizationConfig(type=ScalarType.INT8, quantile=0.99, always_ram=True)),
     )
     for field, schema in _INDEXES.items():
         c.create_payload_index(name, field_name=field, field_schema=schema)

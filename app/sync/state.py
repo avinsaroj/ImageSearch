@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS images (
 );
 CREATE INDEX IF NOT EXISTS ix_images_status ON images(status);
 CREATE INDEX IF NOT EXISTS ix_images_item ON images(item_id);
+CREATE INDEX IF NOT EXISTS ix_images_url ON images(url);
 CREATE TABLE IF NOT EXISTS products (
     item_id INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL, seen_at TEXT
 );
@@ -207,6 +208,19 @@ def pending_images(limit: int, max_attempts: int, after_img_id: int = 0) -> list
     return _conn().execute(
         "SELECT * FROM images WHERE status='pending' AND attempts < ? AND img_id > ? ORDER BY img_id LIMIT ?",
         (max_attempts, after_img_id, limit)).fetchall()
+
+
+def indexed_by_url(urls: list[str], model_version: str) -> dict[str, sqlite3.Row]:
+    """One already-indexed donor row per URL (same model version) so identical files are not re-embedded."""
+    out: dict[str, sqlite3.Row] = {}
+    for i in range(0, len(urls), 500):
+        chunk = urls[i:i + 500]
+        marks = ",".join("?" * len(chunk))
+        for r in _conn().execute(
+                f"SELECT * FROM images WHERE status='indexed' AND model_version=? AND content_hash IS NOT NULL "
+                f"AND url IN ({marks})", (model_version, *chunk)):
+            out.setdefault(r["url"], r)
+    return out
 
 
 def images_not_seen_ids(seen_ids: set[int]) -> list[sqlite3.Row]:

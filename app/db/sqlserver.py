@@ -70,6 +70,11 @@ def _rows(cur: pyodbc.Cursor) -> list[dict]:
     return [dict(zip(cols, r)) for r in cur.fetchall()]
 
 
+def _item_id_cap() -> int:
+    """Upper ItemID bound for pilot runs (SYNC_ITEM_ID_MAX); 0 means no limit."""
+    return config.SYNC_ITEM_ID_MAX or 9223372036854775807
+
+
 def image_url(img_path: Optional[str]) -> Optional[str]:
     """Same construction as the reference query: base + ImgPath."""
     if not img_path or not str(img_path).strip():
@@ -111,10 +116,13 @@ def count_images() -> int:
 def iter_products(batch_size: int, after_item_id: int = 0) -> Iterator[list[dict]]:
     """Keyset-paginated product batches ordered by ItemID (resumable from a checkpoint)."""
     last = after_item_id
-    sql = f"SELECT TOP (?) {_PRODUCT_COLUMNS} {_PRODUCT_FROM} WHERE i.ItemID > ? ORDER BY i.ItemID"
+    sql = (f"SELECT TOP (?) {_PRODUCT_COLUMNS} {_PRODUCT_FROM} "
+           "WHERE i.ItemID > ? AND i.ItemID <= ? "
+           + ("AND i.ItemValidSts = 'Y' " if config.SYNC_ONLY_VALID else "")
+           + "ORDER BY i.ItemID")
     with connect() as conn:
         while True:
-            batch = _rows(conn.cursor().execute(sql, batch_size, last))
+            batch = _rows(conn.cursor().execute(sql, batch_size, last, _item_id_cap()))
             if not batch:
                 return
             yield batch
@@ -151,11 +159,11 @@ def iter_all_image_rows(batch_size: int, after_img_id: int = 0) -> Iterator[list
     last = after_img_id
     sql = (
         f"SELECT TOP (?) {_IMAGE_COLUMNS} FROM dbo.T_IMAGE_MST AS img "
-        "WHERE img.ImgID > ? AND img.ImgTagRefID IS NOT NULL ORDER BY img.ImgID"
+        "WHERE img.ImgID > ? AND img.ImgTagRefID IS NOT NULL AND img.ImgTagRefID <= ? ORDER BY img.ImgID"
     )
     with connect() as conn:
         while True:
-            batch = _rows(conn.cursor().execute(sql, batch_size, last))
+            batch = _rows(conn.cursor().execute(sql, batch_size, last, _item_id_cap()))
             if not batch:
                 return
             for r in batch:
