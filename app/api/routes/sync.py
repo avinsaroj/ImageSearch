@@ -24,9 +24,11 @@ def require_admin(x_admin_token: Optional[str] = Header(default=None)) -> None:
 class SyncScope(BaseModel):
     """Which products (and their images) a sync covers. All fields optional; empty means everything."""
     categories: list[str] = []
-    item_id_min: Optional[int] = Field(default=None, ge=0)
-    item_id_max: Optional[int] = Field(default=None, ge=0)
-    only_valid: bool = False
+    plain_gold: Optional[bool] = None  # True / False / None (any); same for the flags below
+    solitaire: Optional[bool] = None
+    valid: Optional[bool] = None
+    franchise: Optional[bool] = None
+    search_text: Optional[str] = Field(default=None, max_length=100)  # substring of item code or status remark
     max_products: Optional[int] = Field(default=None, ge=1)  # embed only the first N matching products (test runs)
 
 

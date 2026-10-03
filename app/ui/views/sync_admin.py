@@ -40,14 +40,14 @@ def _scope_form() -> dict:
     if err:
         st.warning(f"Category list unavailable: {err}")
     chosen = st.multiselect("Categories", options, placeholder="All categories")
-    lo, hi = st.columns(2)
-    id_min = lo.number_input("ItemID from", min_value=0, value=0, step=1, help="0 = no lower bound")
-    id_max = hi.number_input("ItemID to", min_value=0, value=0, step=1, help="0 = no upper bound")
-    only_valid = st.checkbox("Only valid products (ItemValidSts = Y)")
+    flags = {}
+    for col, (key, label) in zip(st.columns(4), (("plain_gold", "Plain gold"), ("solitaire", "Solitaire"),
+                                                 ("valid", "Valid"), ("franchise", "Franchise item"))):
+        flags[key] = {"Any": None, "Yes": True, "No": False}[col.selectbox(label, ["Any", "Yes", "No"], key=f"sc_{key}")]
+    text = st.text_input("Search text", placeholder="item code or status remark contains…")
     limit = st.number_input("Test sample: first N products only", min_value=0, value=0, step=10,
                             help="0 = all matching products. Use e.g. 20 to try the pipeline quickly.")
-    return {"categories": chosen, "item_id_min": int(id_min) or None, "item_id_max": int(id_max) or None,
-            "only_valid": only_valid, "max_products": int(limit) or None}
+    return {"categories": chosen, **flags, "search_text": text.strip() or None, "max_products": int(limit) or None}
 
 
 def render() -> None:

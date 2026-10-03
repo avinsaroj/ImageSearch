@@ -75,22 +75,34 @@ _MAX_ID = 9223372036854775807
 
 def scope_defaults() -> dict:
     """Scope used when a job carries none: the SYNC_* environment settings."""
-    return {"item_id_max": config.SYNC_ITEM_ID_MAX or None, "only_valid": config.SYNC_ONLY_VALID}
+    return {"item_id_max": config.SYNC_ITEM_ID_MAX or None, "valid": True if config.SYNC_ONLY_VALID else None}
 
 
 def _scope_where(scope: Optional[dict]) -> tuple[str, list]:
     """WHERE clause (on aliases i = T_ITEM_MST, cm = T_COMMON_MASTER) and params for a sync scope.
 
-    scope keys: categories, item_id_min, item_id_max, only_valid. None means the environment defaults."""
+    scope keys: categories, plain_gold / solitaire / valid / franchise (True, False or None = any),
+    search_text (substring of item code or status remark); item_id_min / item_id_max come from the env
+    defaults only. None means the environment defaults."""
     s = scope_defaults() if scope is None else scope
     clauses = ["i.ItemID >= ?", "i.ItemID <= ?"]
     args: list = [s.get("item_id_min") or 0, s.get("item_id_max") or _MAX_ID]
-    if s.get("only_valid"):
-        clauses.append("i.ItemValidSts = 'Y'")
     cats = s.get("categories") or []
     if cats:
         clauses.append(f"cm.MstCd IN ({','.join('?' * len(cats))})")
         args += cats
+    valid = s.get("valid")
+    if valid is None and s.get("only_valid"):  # scopes saved before the yes/no filters existed
+        valid = True
+    for flag, col in ((s.get("plain_gold"), "ItemPlainGold"), (s.get("solitaire"), "ItemSoliterSts"),
+                      (valid, "ItemValidSts"), (s.get("franchise"), "ItemFranchiseSts")):
+        if flag is not None:
+            clauses.append(f"i.{col} = '{'Y' if flag else 'N'}'")
+    text = (s.get("search_text") or "").strip()
+    if text:
+        like = "%" + text.replace("[", "[[]").replace("%", "[%]").replace("_", "[_]") + "%"
+        clauses.append("(i.ItemCd LIKE ? OR i.ItemStatusRemark LIKE ?)")
+        args += [like, like]
     return " AND ".join(clauses), args
 
 
