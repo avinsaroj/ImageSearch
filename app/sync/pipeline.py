@@ -138,7 +138,7 @@ def _scan_catalog(p: Progress, c, collection: str) -> set[int]:
         ids = [r["ItemID"] for r in batch]
         known = state.get_product_fingerprints(ids)
         for prod in batch:
-            master_ids.add(prod["ItemID"])
+            master_ids.add(int(prod["ItemID"]))
             fp = _product_fp(prod)
             old = known.get(prod["ItemID"])
             if old != fp:
@@ -154,11 +154,12 @@ def _scan_catalog(p: Progress, c, collection: str) -> set[int]:
     for batch in db.iter_all_image_rows(config.SYNC_PRODUCT_BATCH * 5):
         _check_stop()
         for r in batch:
-            if r["ItemID"] not in master_ids:
+            item_id, img_id = int(r["ItemID"]), int(r["ImgID"])  # SQLite keys are ints; keep `seen` comparable
+            if item_id not in master_ids:
                 continue
-            seen.add(r["ImgID"])
-            fp = _fingerprint(r["ItemID"], r["ImageURL"], r["ImgViewID"])
-            state.upsert_image_seen(r["ImgID"], r["ItemID"], r["ImageURL"], r["ImgViewID"], fp)
+            seen.add(img_id)
+            fp = _fingerprint(item_id, r["ImageURL"], r["ImgViewID"])
+            state.upsert_image_seen(img_id, item_id, r["ImageURL"], r["ImgViewID"], fp)
         p.c["images_scanned"] += len(batch)
         p.tick()
 
@@ -318,6 +319,8 @@ def run(job_id: str, kind: str) -> None:
         p.stage("validating rebuild")
         counts = state.image_counts()
         n_points = index.count_points(c, target)
+        if counts["indexed"] == 0 and n_points == 0:
+            raise RuntimeError("rebuild not promoted: no images were indexed (check catalog filters / image scan)")
         if counts["pending"] == 0 and n_points >= counts["indexed"]:
             index.switch_alias(c, target)
             state.kv_set("rebuild.target", None)
