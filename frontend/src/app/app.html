@@ -1,0 +1,38 @@
+<div class="shell">
+  <aside class="side">
+    <a class="brand" routerLink="/search">
+      <span class="gem">💎</span>
+      <span>Jewellery Search<small>Visual similarity</small></span>
+    </a>
+
+    <nav aria-label="Main">
+      @for (n of nav; track n.path) {
+        <a [routerLink]="n.path" routerLinkActive="active">
+          <span class="ico" aria-hidden="true">{{ n.icon }}</span>
+          <span class="lbl">{{ n.label }}</span>
+        </a>
+      }
+    </nav>
+
+    <div class="foot">
+      <div class="status" role="status">
+        <i class="dot" [class.on]="online() === true" [class.off]="online() === false"></i>
+        {{ online() === null ? 'Checking API…' : online() ? 'API connected' : 'API unreachable' }}
+      </div>
+      <button class="btn ghost small-btn" (click)="tokenOpen.set(!tokenOpen())" [attr.aria-expanded]="tokenOpen()">
+        🔑 Admin token{{ auth.token() ? ' ✓' : '' }}
+      </button>
+      @if (tokenOpen()) {
+        <div class="token">
+          <input type="password" placeholder="X-Admin-Token" aria-label="Admin token"
+                 [value]="auth.token()" (change)="auth.set($any($event.target).value)" />
+          <p class="muted small">Needed for Dashboard and Sync admin. Kept for this browser tab only.</p>
+        </div>
+      }
+    </div>
+  </aside>
+
+  <main class="main">
+    <router-outlet />
+  </main>
+</div>

@@ -64,6 +64,16 @@ services:
     restart: unless-stopped
     stop_grace_period: 60s   # lets the running batch finish and the job be marked resumable
 
+  # Angular UI served by nginx on :4200; /api is proxied to the app service.
+  frontend:
+    build: ./frontend
+    ports:
+      - "4200:80"
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
   streamlit:
     build: *app-build
     image: image-search

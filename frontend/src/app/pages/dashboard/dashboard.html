@@ -1,0 +1,66 @@
+<div class="page">
+  <header class="page-head head-row">
+    <div>
+      <h1>Index dashboard</h1>
+      <p>Products, images and vectors are different counts: a product has several images, and each indexed image is one vector in Qdrant.</p>
+    </div>
+    <button class="btn" type="button" (click)="reload()">↻ Refresh</button>
+  </header>
+
+  @if (needsToken()) {
+    <app-token-box (saved)="reload()" />
+  } @else if (error(); as e) {
+    <div class="alert error" role="alert">{{ e }}</div>
+  }
+
+  @if (status(); as s) {
+    <section class="grid kpis">
+      <div class="card kpi"><span class="label">Products</span><strong>{{ fmt(s.sql_server.products) }}</strong><small>SQL Server</small></div>
+      <div class="card kpi"><span class="label">Images</span><strong>{{ fmt(s.sql_server.images) }}</strong><small>SQL Server</small></div>
+      <div class="card kpi"><span class="label">Indexed</span><strong>{{ fmt(s.images.indexed) }}</strong><small>images embedded</small></div>
+      <div class="card kpi"><span class="label">Pending</span><strong>{{ fmt(s.images.pending) }}</strong><small>waiting to process</small></div>
+      <div class="card kpi" [class.bad]="s.images.failed > 0"><span class="label">Failed</span><strong>{{ fmt(s.images.failed) }}</strong><small>see Sync admin</small></div>
+    </section>
+
+    @if (s.sql_server.error) {
+      <div class="alert error">SQL Server totals unavailable ({{ s.sql_server.error }}).</div>
+    }
+
+    @if (s.sql_server.images) {
+      <section class="card">
+        <div class="row"><span class="label">Index coverage</span>
+          <span class="muted small">{{ fmt(s.images.indexed) }} of {{ fmt(s.sql_server.images) }} images · {{ indexedPct() | number: '1.1-1' }}%</span></div>
+        <div class="progress" role="progressbar" [attr.aria-valuenow]="indexedPct()" aria-valuemin="0" aria-valuemax="100"><i [style.width.%]="indexedPct()"></i></div>
+      </section>
+    }
+
+    <section class="grid kpis three">
+      <div class="card kpi">
+        <span class="label">Qdrant</span>
+        <strong [class.ok]="s.qdrant.status === 'ok'" [class.bad-text]="s.qdrant.status !== 'ok'">{{ s.qdrant.status }}</strong>
+        <small>{{ fmt(s.qdrant.points) }} vectors</small>
+      </div>
+      <div class="card kpi">
+        <span class="label">Sync</span>
+        <strong>{{ s.current_job ? s.current_job.kind + ' running' : 'Idle' }}</strong>
+        <small>{{ s.current_job?.stage ?? '' }}</small>
+      </div>
+      <div class="card kpi">
+        <span class="label">Last successful sync</span>
+        <strong class="sm">{{ when(s.last_success?.finished_at) }}</strong>
+        <small>{{ s.last_success?.kind ?? '' }}</small>
+      </div>
+    </section>
+
+    <details class="card tech">
+      <summary>Technical details</summary>
+      <dl>
+        <dt>Model version</dt><dd class="mono">{{ s.model_version }}</dd>
+        <dt>Collection</dt><dd class="mono">{{ s.qdrant.collection ?? '–' }} (alias {{ s.qdrant.alias }})</dd>
+        <dt>Daily schedule</dt><dd>{{ s.scheduler.daily_at }} {{ s.scheduler.timezone }} (last fired: {{ s.scheduler.last_fired_date ?? 'never' }})</dd>
+      </dl>
+    </details>
+  } @else if (loading()) {
+    <div class="loading"><span class="spinner"></span> Loading…</div>
+  }
+</div>

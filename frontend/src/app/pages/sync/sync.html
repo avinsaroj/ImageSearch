@@ -1,0 +1,170 @@
+<div class="page">
+  <header class="page-head">
+    <h1>Sync admin</h1>
+    <p>Run and monitor synchronization from SQL Server. Jobs run in the worker, so closing this page never interrupts them.</p>
+  </header>
+
+  @if (needsToken()) {
+    <app-token-box (saved)="retryAuth()" />
+  } @else if (statusError(); as e) {
+    <div class="alert error" role="alert">{{ e }}</div>
+  }
+
+  <!-- live progress -->
+  @if (status()) {
+    <section class="card live" aria-live="polite">
+      @if (job(); as j) {
+        <div class="row">
+          <div>
+            <strong>{{ j.kind === 'full' ? 'Full' : 'Incremental' }} sync</strong>
+            <span class="mono muted"> · {{ j.job_id.slice(0, 8) }}</span>
+            <span [class]="'chip ' + statusClass(j.status)"> {{ j.status }}</span>
+          </div>
+          <span class="muted small">{{ j.stage }}</span>
+        </div>
+        <div class="progress" role="progressbar" [attr.aria-valuenow]="progress()" aria-valuemin="0" aria-valuemax="100"><i [style.width.%]="progress()"></i></div>
+        <p class="muted small">Images processed {{ (j.counters.processed ?? 0) | number }} / {{ (j.counters.to_process ?? 0) | number }}</p>
+        <div class="mini">
+          <div><span>Indexed</span><b>{{ j.counters.indexed ?? 0 | number }}</b></div>
+          <div><span>Reused</span><b>{{ j.counters.reused ?? 0 | number }}</b></div>
+          <div><span>Failed</span><b [class.bad-text]="(j.counters.failed ?? 0) > 0">{{ j.counters.failed ?? 0 | number }}</b></div>
+          <div><span>Products scanned</span><b>{{ j.counters.products_scanned ?? 0 | number }}</b></div>
+          <div><span>Images scanned</span><b>{{ j.counters.images_scanned ?? 0 | number }}</b></div>
+        </div>
+      } @else {
+        <div class="alert ok">No sync job running.</div>
+      }
+    </section>
+  }
+
+  @if (notice(); as n) { <div class="alert" [class.ok]="n.kind === 'ok'" [class.error]="n.kind === 'error'" role="status">{{ n.text }}</div> }
+
+  <div class="grid cols-2 run">
+    <!-- incremental -->
+    <section class="card stack">
+      <div>
+        <h2>Incremental</h2>
+        <p class="muted small">New and changed products/images only. Also runs automatically every day at {{ status()?.scheduler?.daily_at ?? '…' }}.</p>
+      </div>
+      @if (lastScope()) {
+        <p class="small">Scope ({{ lastScope()!.source.replace('_', ' ') }}): <span class="mono">{{ scopeSummary() }}</span></p>
+      }
+      <div><button class="btn primary" type="button" [disabled]="busy() !== null || needsToken()" (click)="startIncremental()">
+        @if (busy() === 'incremental') { <span class="spinner"></span> } Run incremental now
+      </button></div>
+    </section>
+
+    <!-- full -->
+    <section class="card stack">
+      <div>
+        <h2>Full sync / rebuild</h2>
+        <p class="muted small">Embeds the selected images into a new collection and switches search to it only after validation. The current index keeps serving meanwhile.</p>
+      </div>
+
+      <div class="field">
+        <span class="label">Categories {{ scope().categories.length ? '(' + scope().categories.length + ' selected)' : '· all' }}</span>
+        <div class="cat-list">
+          @for (c of categories()?.categories ?? []; track c.code) {
+            <button type="button" class="pill" [attr.aria-pressed]="scope().categories.includes(c.code)" (click)="toggleCategory(c.code)">{{ c.code }}</button>
+          } @empty {
+            <span class="muted small">Category list unavailable.</span>
+          }
+        </div>
+      </div>
+
+      <div class="grid flags">
+        @for (f of flags; track f.key) {
+          <div class="field">
+            <span class="label">{{ f.label }}</span>
+            <div class="seg" role="group" [attr.aria-label]="f.label">
+              @for (t of triOptions; track t.label) {
+                <button type="button" [attr.aria-pressed]="scope()[f.key] === t.value" (click)="setFlag(f.key, t.value)">{{ t.label }}</button>
+              }
+            </div>
+          </div>
+        }
+      </div>
+
+      <div class="grid two">
+        <div class="field">
+          <label for="stext">Search text</label>
+          <input id="stext" type="text" placeholder="item code or status remark contains…" [value]="scope().search_text ?? ''" (change)="setText($any($event.target).value)" />
+        </div>
+        <div class="field">
+          <label for="slimit">Test sample: first N products</label>
+          <input id="slimit" type="number" min="0" step="10" placeholder="0 = all" [value]="scope().max_products ?? ''" (change)="setLimit($any($event.target).value)" />
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn" type="button" [disabled]="busy() !== null || needsToken()" (click)="runPreview()">
+          @if (busy() === 'preview') { <span class="spinner"></span> } Preview size
+        </button>
+        <button class="btn ghost" type="button" (click)="clearScope()">Clear selection</button>
+      </div>
+
+      @if (preview(); as p) {
+        <div class="alert info"><b>{{ p.products | number }}</b> products · <b>{{ p.images | number }}</b> image rows · <b>{{ p.files | number }}</b> distinct files to embed</div>
+      }
+
+      <label class="check"><input type="checkbox" [checked]="confirm()" (change)="confirm.set($any($event.target).checked)" /> I understand this rebuilds the index with the selection above</label>
+      <div><button class="btn primary" type="button" [disabled]="!confirm() || busy() !== null || needsToken()" (click)="startFull()">
+        @if (busy() === 'full') { <span class="spinner"></span> } Start full sync
+      </button></div>
+    </section>
+  </div>
+
+  <!-- tabs -->
+  <section class="card">
+    <div class="tabs" role="tablist">
+      <button role="tab" [attr.aria-selected]="tab() === 'failed'" (click)="tab.set('failed')">Failed images @if (failures()?.length) { <span class="chip bad">{{ failures()!.length }}</span> }</button>
+      <button role="tab" [attr.aria-selected]="tab() === 'history'" (click)="tab.set('history')">History</button>
+    </div>
+
+    @if (tab() === 'failed') {
+      @if (failures() === null) {
+        <p class="muted">Unavailable (check the admin token).</p>
+      } @else if (!failures()!.length) {
+        <div class="alert ok">No failed images.</div>
+      } @else {
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Img</th><th>Item</th><th>Attempts</th><th>Last error</th><th>Last tried (UTC)</th><th>URL</th></tr></thead>
+            <tbody>
+              @for (f of failures(); track f.img_id) {
+                <tr>
+                  <td>{{ f.img_id }}</td><td>{{ f.item_id }}</td><td>{{ f.attempts }}</td>
+                  <td class="wrap">{{ f.last_error ?? '–' }}</td><td>{{ when(f.last_processed_at) }}</td>
+                  <td class="wrap"><a [href]="f.url" target="_blank" rel="noopener">open</a></td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        <div class="retry"><button class="btn" type="button" [disabled]="busy() !== null" (click)="retryFailed()">Retry all failed</button></div>
+      }
+    } @else {
+      @if (history() === null) {
+        <p class="muted">Unavailable (check the admin token).</p>
+      } @else if (!history()!.length) {
+        <p class="muted">No jobs yet.</p>
+      } @else {
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Started (UTC)</th><th>Finished</th><th>Kind</th><th>Trigger</th><th>Status</th><th>Indexed</th><th>Skipped</th><th>Failed</th><th>Error</th></tr></thead>
+            <tbody>
+              @for (j of history(); track j.job_id) {
+                <tr>
+                  <td>{{ when(j.started_at) }}</td><td>{{ when(j.finished_at) }}</td><td>{{ j.kind }}</td><td>{{ j.trigger }}</td>
+                  <td><span [class]="'chip ' + statusClass(j.status)">{{ j.status }}</span></td>
+                  <td>{{ j.counters.indexed ?? '–' }}</td><td>{{ j.counters.skipped ?? '–' }}</td><td>{{ j.counters.failed ?? '–' }}</td>
+                  <td class="wrap">{{ j.error ?? '' }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    }
+  </section>
+</div>

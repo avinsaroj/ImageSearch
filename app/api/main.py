@@ -5,10 +5,11 @@ import time
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.api.routes.search import router as search_router, _service
+from app.api.routes.search import router as search_router
 from app.api.routes.products import router as products_router
 from app.api.routes.sync import router as sync_router
-from app.config import LOG_LEVEL, COLLECTION_NAME, QDRANT_HOST, QDRANT_PORT
+from app.config import LOG_LEVEL, COLLECTION_NAME, PRODUCT_COLLECTION, QDRANT_HOST, QDRANT_PORT
+from app.sync import index
 
 # Logging setup
 logging.basicConfig(
@@ -61,32 +62,28 @@ async def log_requests(request: Request, call_next):
 #  Health 
 @app.get("/health", tags=["System"])
 def health():
-    
-    qdrant_ok = _service.qdrant_is_healthy()
+    """Healthy when Qdrant is reachable and the product index alias points at a collection."""
+    try:
+        c = index.client()
+        real = index.resolve_alias(c)
+        points = index.count_points(c, real) if real else None
+    except Exception as exc:
+        logger.warning("Health check failed — Qdrant at %s:%s unreachable: %s", QDRANT_HOST, QDRANT_PORT, exc)
+        return JSONResponse(
+            status_code=503,
+            content={"status": "degraded", "qdrant": "unreachable",
+                     "detail": f"Cannot reach Qdrant at {QDRANT_HOST}:{QDRANT_PORT}."},
+        )
 
-    if qdrant_ok:
-        return {
-            "status":     "ok",
-            "qdrant":     "reachable",
-            "collection": COLLECTION_NAME,
-        }
-
-    logger.warning(
-        "Health check failed — Qdrant at %s:%s unreachable or collection '%s' missing",
-        QDRANT_HOST, QDRANT_PORT, COLLECTION_NAME,
-    )
-    return JSONResponse(
-        status_code=503,
-        content={
-            "status":     "degraded",
-            "qdrant":     "unreachable",
-            "collection": COLLECTION_NAME,
-            "detail":     (
-                f"Cannot reach Qdrant at {QDRANT_HOST}:{QDRANT_PORT} "
-                f"or collection '{COLLECTION_NAME}' does not exist."
-            ),
-        },
-    )
+    if not real:
+        logger.warning("Health check: alias '%s' does not point at a collection yet", PRODUCT_COLLECTION)
+        return JSONResponse(
+            status_code=503,
+            content={"status": "degraded", "qdrant": "reachable", "alias": PRODUCT_COLLECTION,
+                     "detail": f"No product index yet: alias '{PRODUCT_COLLECTION}' is not set. Run a full sync."},
+        )
+    return {"status": "ok", "qdrant": "reachable", "alias": PRODUCT_COLLECTION,
+            "collection": real, "points": points}
 
 
 #  Startup / shutdown events 
