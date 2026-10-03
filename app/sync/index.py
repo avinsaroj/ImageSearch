@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     CreateAlias, CreateAliasOperation, DeleteAlias, DeleteAliasOperation, Distance, FieldCondition,
-    Filter, FilterSelector, MatchValue, PayloadSchemaType, PointStruct, ScalarQuantization,
+    Filter, FilterSelector, HasIdCondition, MatchValue, PayloadSchemaType, PointStruct, ScalarQuantization,
     ScalarQuantizationConfig, ScalarType, VectorParams,
 )
 
@@ -171,8 +171,9 @@ def update_product_payload(c: QdrantClient, collection: str, product: dict) -> N
 
 
 def deactivate_images(c: QdrantClient, collection: str, img_ids: list[int]) -> None:
-    ids = [point_id(i) for i in img_ids]
-    c.set_payload(collection_name=collection, payload={"is_active": False}, points=ids, wait=True)
+    # A has-id filter (unlike an explicit id list) does not fail when some points are missing.
+    flt = Filter(must=[HasIdCondition(has_id=[point_id(i) for i in img_ids])])
+    c.set_payload(collection_name=collection, payload={"is_active": False}, points=flt, wait=True)
 
 
 def delete_images(c: QdrantClient, collection: str, img_ids: list[int]) -> None:

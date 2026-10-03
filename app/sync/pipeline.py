@@ -163,16 +163,17 @@ def _scan_catalog(p: Progress, c, collection: str) -> set[int]:
         p.tick()
 
     p.stage("applying deletion policy")
-    gone = [r["img_id"] for r in state.images_not_seen_ids(seen)]
-    for i in range(0, len(gone), 500):
-        chunk = gone[i:i + 500]
+    gone_rows = state.images_not_seen_ids(seen)
+    # Only images that were actually indexed have a point to deactivate/delete.
+    indexed_gone = [r["img_id"] for r in gone_rows if r["status"] == "indexed"]
+    for i in range(0, len(indexed_gone), 500):
+        chunk = indexed_gone[i:i + 500]
         if config.SYNC_DELETION_POLICY == "delete":
             index.delete_images(c, collection, chunk)
         else:
             index.deactivate_images(c, collection, chunk)
-        for img_id in chunk:
-            state.mark_image(img_id, "removed")
-    p.c["images_removed"] = len(gone)
+    state.mark_removed_bulk([r["img_id"] for r in gone_rows])
+    p.c["images_removed"] = len(gone_rows)
     return master_ids
 
 

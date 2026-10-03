@@ -224,8 +224,17 @@ def indexed_by_url(urls: list[str], model_version: str) -> dict[str, sqlite3.Row
 
 
 def images_not_seen_ids(seen_ids: set[int]) -> list[sqlite3.Row]:
-    rows = _conn().execute("SELECT img_id,item_id FROM images WHERE status!='removed'").fetchall()
+    rows = _conn().execute("SELECT img_id,item_id,status FROM images WHERE status!='removed'").fetchall()
     return [r for r in rows if r["img_id"] not in seen_ids]
+
+
+def mark_removed_bulk(img_ids: list[int]) -> None:
+    """Mark many images removed in a single transaction (per-row commits are far too slow for millions)."""
+    with _tx() as c:
+        for i in range(0, len(img_ids), 5000):
+            chunk = img_ids[i:i + 5000]
+            c.executemany("UPDATE images SET status='removed', last_processed_at=? WHERE img_id=?",
+                          [(now(), x) for x in chunk])
 
 
 def image_counts() -> dict:
