@@ -1,0 +1,29 @@
+{
+  "config": {
+    "url": "http://localhost:8000",
+    "users": 50,
+    "duration": 30
+  },
+  "wall_time_seconds": 34.22,
+  "throughput_rps": 4.59,
+  "total": 157,
+  "success": 157,
+  "failure": 0,
+  "success_rate": "100.0%",
+  "latency": {
+    "min": "1855ms",
+    "max": "23983ms",
+    "mean": "9674ms",
+    "median": "3108ms",
+    "p95": "23974ms",
+    "p99": "23977ms"
+  },
+  "by_endpoint": {
+    "/search-image": {
+      "ok": 157,
+      "fail": 0,
+      "mean_ms": "9674ms"
+    }
+  },
+  "errors": []
+}

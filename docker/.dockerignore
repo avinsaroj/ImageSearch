@@ -1,0 +1,21 @@
+# Data (IMPORTANT)
+data/
+*.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.env/
+.env.*
+
+# Git
+.git/
+.gitignore
+
+# Logs
+*.log

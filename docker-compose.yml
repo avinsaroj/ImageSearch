@@ -1,0 +1,86 @@
+version: "3.9"
+
+# Copy .env.example to .env and fill in SQL Server settings before `docker compose up`.
+x-app-env: &app-env
+  QDRANT_HOST: qdrant
+  QDRANT_PORT: "6333"
+  PYTHONPATH: /app
+  CLIP_MODEL_NAME: ViT-L-14
+  CLIP_PRETRAINED: datacomp_xl_s13b_b90k
+  DINO_MODEL_NAME: facebook/dinov2-base
+  SYNC_STATE_DB: /app/state/sync_state.db
+  HF_HOME: /cache/hf
+
+x-build: &app-build
+  context: .
+  dockerfile: docker/Dockerfile
+
+services:
+  qdrant:
+    image: qdrant/qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: *app-build
+    image: image-search
+    ports:
+      - "8005:8000"
+    env_file: .env
+    environment: *app-env
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    volumes:
+      - sync_state:/app/state
+      - hf_cache:/cache/hf
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/openapi.json', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s   # CLIP + DINOv2 load on start
+
+  # Runs the daily scheduler and executes sync jobs outside HTTP requests (single instance).
+  worker:
+    build: *app-build
+    image: image-search
+    command: ["python", "-m", "app.sync.worker"]
+    env_file: .env
+    environment: *app-env
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      app:
+        condition: service_started
+    volumes:
+      - sync_state:/app/state
+      - hf_cache:/cache/hf
+    restart: unless-stopped
+    stop_grace_period: 60s   # lets the running batch finish and the job be marked resumable
+
+  streamlit:
+    build: *app-build
+    image: image-search
+    ports:
+      - "8501:8501"
+    env_file: .env
+    environment:
+      <<: *app-env
+      API_URL: http://app:8000
+    depends_on:
+      app:
+        condition: service_healthy
+    command: ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+
+volumes:
+  qdrant_data:
+  sync_state:
+  hf_cache:
