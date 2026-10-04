@@ -34,6 +34,8 @@ CREATE INDEX IF NOT EXISTS ix_images_url ON images(url);
 CREATE TABLE IF NOT EXISTS products (
     item_id INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL, seen_at TEXT
 );
+CREATE TABLE IF NOT EXISTS item_codes (code TEXT PRIMARY KEY, item_id INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_item_codes_item ON item_codes(item_id);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
 """
 
@@ -286,6 +288,30 @@ def get_product_fingerprints(item_ids: list[int]) -> dict[int, str]:
     marks = ",".join("?" * len(item_ids))
     rows = _conn().execute(f"SELECT item_id,fingerprint FROM products WHERE item_id IN ({marks})", item_ids)
     return {r["item_id"]: r["fingerprint"] for r in rows}
+
+
+def claim_item_codes(pairs: list[tuple[str, int]]) -> dict[int, int]:
+    """Give each ItemCode to the first ItemID that claims it. Returns {item_id: owner_item_id}.
+
+    An owner whose code changed releases its old code; an item whose owner differs is a duplicate."""
+    owners: dict[int, int] = {}
+    with _tx() as c:
+        for code, item_id in pairs:
+            c.execute("DELETE FROM item_codes WHERE item_id=? AND code!=?", (item_id, code))
+            c.execute("INSERT OR IGNORE INTO item_codes(code,item_id) VALUES(?,?)", (code, item_id))
+            owners[item_id] = c.execute("SELECT item_id FROM item_codes WHERE code=?", (code,)).fetchone()[0]
+    return owners
+
+
+def clear_item_codes() -> None:
+    _conn().execute("DELETE FROM item_codes")
+
+
+def remove_item_images(item_id: int) -> int:
+    """Mark all of an item's images removed; returns how many were live."""
+    return _conn().execute(
+        "UPDATE images SET status='removed', last_processed_at=? WHERE item_id=? AND status!='removed'",
+        (now(), item_id)).rowcount
 
 
 def set_product_fingerprint(item_id: int, fingerprint: str) -> None:

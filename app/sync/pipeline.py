@@ -67,7 +67,7 @@ class Progress:
     def __init__(self, job_id: str):
         self.job_id = job_id
         self.c = {"products_scanned": 0, "products_changed": 0, "images_scanned": 0, "images_registered": 0,
-                  "images_removed": 0, "to_process": 0, "processed": 0, "indexed": 0, "reused": 0, "skipped": 0, "failed": 0}
+                  "images_removed": 0, "duplicates": 0, "to_process": 0, "processed": 0, "indexed": 0, "reused": 0, "skipped": 0, "failed": 0}
         self._last = 0.0
 
     def stage(self, name: str) -> None:
@@ -138,6 +138,23 @@ def _view_id(v):
 
 
 # phases
+def _drop_duplicate_codes(p: Progress, c, collection: str, batch: list, duplicates: set[int]) -> list:
+    """Keep the first product per ItemCode; delete the images of any later product with the same code."""
+    pairs = [(str(r["ItemCode"]).strip().upper(), int(r["ItemID"])) for r in batch if r.get("ItemCode")]
+    owners = state.claim_item_codes([pair for pair in pairs if pair[0]])
+    keep = []
+    for r in batch:
+        item_id = int(r["ItemID"])
+        if owners.get(item_id, item_id) == item_id:
+            keep.append(r)
+            continue
+        duplicates.add(item_id)
+        p.c["duplicates"] += 1
+        if state.remove_item_images(item_id):
+            index.delete_item(c, collection, item_id)  # duplicate that was indexed earlier
+    return keep
+
+
 def _scan_catalog(p: Progress, c, collection: str, scopes: list, rebuild: bool) -> set[int]:
     """Phases 1-3 over the union of `scopes`. Returns the set of ItemIDs present in the master.
 
@@ -146,10 +163,14 @@ def _scan_catalog(p: Progress, c, collection: str, scopes: list, rebuild: bool) 
     are left untouched, and only images that no longer exist in SQL Server are deactivated."""
     p.stage("scanning products")
     master_ids: set[int] = set()
+    duplicates: set[int] = set()  # ItemIDs whose ItemCode already belongs to another product
+    if rebuild:
+        state.clear_item_codes()  # a rebuild only holds its own scope, so code ownership starts over
     for scope in scopes:
         for batch in db.iter_products(config.SYNC_PRODUCT_BATCH, scope):
             _check_stop()
-            batch = [r for r in batch if int(r["ItemID"]) not in master_ids]  # already seen via another scope
+            batch = [r for r in batch if int(r["ItemID"]) not in master_ids and int(r["ItemID"]) not in duplicates]  # seen via another scope
+            batch = _drop_duplicate_codes(p, c, collection, batch, duplicates)
             ids = [r["ItemID"] for r in batch]
             known = state.get_product_fingerprints(ids)
             for prod in batch:
