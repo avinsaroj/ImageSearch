@@ -74,20 +74,6 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  streamlit:
-    build: *app-build
-    image: image-search
-    ports:
-      - "8501:8501"
-    env_file: .env
-    environment:
-      <<: *app-env
-      API_URL: http://app:8000
-    depends_on:
-      app:
-        condition: service_healthy
-    command: ["streamlit", "run", "streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
-
 volumes:
   qdrant_data:
   sync_state:

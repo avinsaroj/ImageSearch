@@ -3,7 +3,8 @@ import { inject, Injectable } from '@angular/core';
 import { catchError, map, Observable, of } from 'rxjs';
 
 import {
-  Categories, FailedImage, Job, ScopeList, ScopePreview, SearchParams, SearchResponse, SyncScope, SyncStatus,
+  Categories, FailedImage, Job, ScopeList, ScopePreview, RankMode, SearchParams, SearchResponse, SimilarResponse, CrossCategoryResponse, Tri, SyncScope,
+  SyncStatus,
 } from './models';
 
 /** Base path of the FastAPI service: nginx proxies /api in production, proxy.conf.json in `ng serve`. */
@@ -40,6 +41,26 @@ export class Api {
     if (p.item_codes.trim()) form.append('item_codes', p.item_codes.trim());
     if (p.min_score > 0) form.append('min_score', String(p.min_score));
     return this.http.post<SearchResponse>(`${BASE}/search/image`, form);
+  }
+
+  /** Products that look like an indexed product, ranked from its stored vectors (the product itself is excluded). */
+  similar(itemId: number, p: SearchParams): Observable<SimilarResponse> {
+    const params: Record<string, string | number> = { top_k: p.top_k, mode: p.mode };
+    for (const k of ['plain_gold', 'solitaire', 'valid', 'franchise'] as const) params[k] = p[k];
+    if (p.category) params['category'] = p.category;
+    if (p.min_score > 0) params['min_score'] = p.min_score;
+    return this.http.get<SimilarResponse>(`${BASE}/products/${itemId}/similar`, { params });
+  }
+
+  /** Closest designs to an uploaded photo in each of the `targets` categories. */
+  crossCategory(file: File, targets: string[], perCategory: number, mode: RankMode, valid: Tri): Observable<CrossCategoryResponse> {
+    const form = new FormData();
+    form.append('file', file, file.name);
+    form.append('targets', targets.join(','));
+    form.append('per_category', String(perCategory));
+    form.append('mode', mode);
+    form.append('valid', valid);
+    return this.http.post<CrossCategoryResponse>(`${BASE}/search/cross-category`, form);
   }
 
   status(): Observable<SyncStatus> {

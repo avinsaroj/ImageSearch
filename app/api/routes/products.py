@@ -2,7 +2,7 @@ import logging
 import time
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, Path, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Path, Query, UploadFile
 
 from app.api.routes.search import _decode_image, _service
 from app.config import DEFAULT_TOP_K, MAX_TOP_K
@@ -102,6 +102,68 @@ def get_product(item_id: int = Path(ge=1)):
     return {**{k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in p.items()},
             "normalized": {k: index.to_bool(p.get(k)) for k in
                            ("IsPlainGold", "IsSolitaire", "IsValid", "IsFranchiseItem")}}
+
+
+@router.post("/search/cross-category", tags=["Search"])
+async def search_cross_category(
+    file: UploadFile = File(...),
+    targets: str = Form(description="comma-separated category codes to search in"),
+    per_category: int = Form(default=6, ge=1, le=MAX_TOP_K),
+    mode: str = Form(default="fusion"),
+    plain_gold: Optional[str] = Form(default=None),
+    solitaire: Optional[str] = Form(default=None),
+    valid: Optional[str] = Form(default=None),
+    franchise: Optional[str] = Form(default=None),
+    min_score: Optional[float] = Form(default=None, ge=-1.0, le=1.0),
+):
+    """Upload a product photo (e.g. a necklace); returns the closest designs in each target category."""
+    if mode not in MODES:
+        raise HTTPException(status_code=422, detail=f"mode must be one of {list(MODES)}")
+    cats = list(dict.fromkeys(c.strip() for c in targets.split(",") if c.strip()))
+    if not cats or len(cats) > 20:
+        raise HTTPException(status_code=422, detail="targets must list 1-20 category codes")
+    pil = _decode_image(file, await file.read())
+    filters = SearchFilters(
+        plain_gold=_tri(plain_gold, "plain_gold"), solitaire=_tri(solitaire, "solitaire"),
+        valid=_tri(valid, "valid"), franchise=_tri(franchise, "franchise"),
+    )
+    try:
+        out = await _search().cross_category(pil, cats, per_category, mode, filters, min_score)
+    except Exception:
+        logger.exception("Cross-category search failed")
+        raise HTTPException(status_code=500, detail="Search failed - see server logs.")
+    out["image_filename"] = file.filename
+    return out
+
+
+@router.get("/products/{item_id}/similar", tags=["Search"])
+async def similar_products(
+    item_id: int = Path(ge=1),
+    top_k: int = Query(default=DEFAULT_TOP_K, ge=1, le=MAX_TOP_K),
+    mode: str = Query(default="fusion"),
+    category: Optional[str] = Query(default=None),
+    plain_gold: Optional[str] = Query(default=None),
+    solitaire: Optional[str] = Query(default=None),
+    valid: Optional[str] = Query(default=None),
+    franchise: Optional[str] = Query(default=None),
+    min_score: Optional[float] = Query(default=None, ge=-1.0, le=1.0),
+):
+    """Products most similar to an indexed product, using its stored image vectors (the product itself is excluded)."""
+    if mode not in MODES:
+        raise HTTPException(status_code=422, detail=f"mode must be one of {list(MODES)}")
+    filters = SearchFilters(
+        category=category or None,
+        plain_gold=_tri(plain_gold, "plain_gold"), solitaire=_tri(solitaire, "solitaire"),
+        valid=_tri(valid, "valid"), franchise=_tri(franchise, "franchise"),
+    )
+    try:
+        out = await _search().similar(item_id, top_k, mode, filters, min_score)
+    except Exception:
+        logger.exception("Similar product search failed")
+        raise HTTPException(status_code=500, detail="Search failed - see server logs.")
+    if out is None:
+        raise HTTPException(status_code=404, detail=f"Product {item_id} is not in the search index")
+    return out
 
 
 @router.get("/products/{item_id}/images", tags=["Catalog"])

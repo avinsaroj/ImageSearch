@@ -74,3 +74,11 @@ dd { margin: 0; font-weight: 600; word-break: break-word; }
 .d-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .gallery.similar figure { cursor: pointer; }
 .gallery.similar figure:focus-visible img, .gallery.similar figure:hover img { border-color: var(--brand, currentColor); }
+
+.cat-title { display: flex; align-items: center; gap: 10px; margin: 28px 0 12px; }
+.checks { display: flex; flex-wrap: wrap; gap: 8px; }
+.check {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; cursor: pointer; font-size: 0.9rem;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2);
+  &.on { border-color: var(--brand); background: var(--brand-soft); }
+}

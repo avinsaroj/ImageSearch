@@ -18,6 +18,7 @@ export class App {
 
   protected readonly nav = [
     { path: '/search', label: 'Search', icon: '🔍' },
+    { path: '/matching-set', label: 'Matching set', icon: '💍' },
     { path: '/dashboard', label: 'Dashboard', icon: '📊' },
     { path: '/sync', label: 'Sync admin', icon: '🔄' },
   ];

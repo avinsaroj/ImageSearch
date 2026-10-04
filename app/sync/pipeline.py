@@ -138,21 +138,56 @@ def _view_id(v):
 
 
 # phases
-def _drop_duplicate_codes(p: Progress, c, collection: str, batch: list, duplicates: set[int]) -> list:
-    """Keep the first product per ItemCode; delete the images of any later product with the same code."""
-    pairs = [(str(r["ItemCode"]).strip().upper(), int(r["ItemID"])) for r in batch if r.get("ItemCode")]
-    owners = state.claim_item_codes([pair for pair in pairs if pair[0]])
+def _evict(p: Progress, c, collection: str, item_id: int, duplicates: set[int], indexed: bool = False) -> None:
+    """`indexed` = the item is known to have points, so delete them even if the state DB lost its rows."""
+    duplicates.add(item_id)
+    p.c["duplicates"] += 1
+    if state.remove_item_images(item_id) or indexed:
+        index.delete_item(c, collection, item_id)  # duplicate that was indexed earlier
+
+
+def _drop_duplicate_codes(p: Progress, c, collection: str, batch: list, duplicates: set[int],
+                          master_ids: set[int]) -> list:
+    """One product per ItemCode (a valid product beats an invalid one, then the lowest ItemID).
+
+    Losers are skipped and their indexed images deleted; an earlier owner displaced by a better
+    claimant in this batch is evicted the same way."""
+    claims = [(str(r["ItemCode"]).strip().upper(), int(r["ItemID"]), index.to_bool(r.get("IsValid")))
+              for r in batch if r.get("ItemCode") and str(r["ItemCode"]).strip()]
+    owners, displaced = state.claim_item_codes(claims)
+    for item_id in displaced:
+        master_ids.discard(item_id)
+        _evict(p, c, collection, item_id, duplicates)
     keep = []
     for r in batch:
         item_id = int(r["ItemID"])
         if owners.get(item_id, item_id) == item_id:
             keep.append(r)
-            continue
-        duplicates.add(item_id)
-        p.c["duplicates"] += 1
-        if state.remove_item_images(item_id):
-            index.delete_item(c, collection, item_id)  # duplicate that was indexed earlier
+        elif item_id not in displaced:
+            _evict(p, c, collection, item_id, duplicates)
     return keep
+
+
+def _dedupe_existing(p: Progress, c, collection: str) -> None:
+    """Once per collection: delete duplicate ItemCodes that are already indexed, and seed code ownership."""
+    flag = f"dedupe.{collection}"
+    if state.kv_get(flag):
+        return
+    p.stage("removing duplicate item codes")
+    by_code: dict[str, list] = {}
+    for item_id, (code, valid) in index.indexed_items(c, collection).items():
+        if code:
+            by_code.setdefault(code, []).append((item_id, index.to_bool(valid)))
+    claims, losers = [], []
+    for code, items in by_code.items():
+        items.sort(key=lambda t: state._code_rank(t[1], t[0]))
+        claims += [(code, item_id, valid) for item_id, valid in items[:1]]
+        losers += [item_id for item_id, _ in items[1:]]
+    state.claim_item_codes(claims)
+    for item_id in losers:
+        _check_stop()
+        _evict(p, c, collection, item_id, set(), indexed=True)
+    state.kv_set(flag, True)
 
 
 def _scan_catalog(p: Progress, c, collection: str, scopes: list, rebuild: bool) -> set[int]:
@@ -166,11 +201,13 @@ def _scan_catalog(p: Progress, c, collection: str, scopes: list, rebuild: bool) 
     duplicates: set[int] = set()  # ItemIDs whose ItemCode already belongs to another product
     if rebuild:
         state.clear_item_codes()  # a rebuild only holds its own scope, so code ownership starts over
+    else:
+        _dedupe_existing(p, c, collection)
     for scope in scopes:
         for batch in db.iter_products(config.SYNC_PRODUCT_BATCH, scope):
             _check_stop()
             batch = [r for r in batch if int(r["ItemID"]) not in master_ids and int(r["ItemID"]) not in duplicates]  # seen via another scope
-            batch = _drop_duplicate_codes(p, c, collection, batch, duplicates)
+            batch = _drop_duplicate_codes(p, c, collection, batch, duplicates, master_ids)
             ids = [r["ItemID"] for r in batch]
             known = state.get_product_fingerprints(ids)
             for prod in batch:

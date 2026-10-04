@@ -96,37 +96,27 @@ class ProductSearch:
             imgs.sort(key=lambda i: i["ImgID"])
         return out
 
-    async def search(self, image: Image.Image, top_k: int, mode: str = "fusion",
-                     filters: SearchFilters | None = None, min_score: float | None = None,
-                     clip_weight: float | None = None, dino_weight: float | None = None) -> dict:
-        if mode not in MODES:
-            raise ValueError(f"mode must be one of {MODES}")
-        weights = _weights(mode, clip_weight, dino_weight)
-        flt = build_filter(filters or SearchFilters())
+    async def _rank(self, queries: list[dict[str, list]], weights: dict[str, float], flt: Filter,
+                    top_k: int, min_score: float | None) -> list:
+        """Rank distinct products for one or more query vectors ({space: vector} each).
+
+        With several queries (the views of one product) an image keeps its best fused score."""
         fetch = min(max(top_k * 10, 50), 500)  # several views per product -> over-fetch images
-
-        def embed() -> dict[str, list]:
-            e = self.embedder
-            vecs = {}
-            if index.CLIP_VEC in weights:
-                vecs[index.CLIP_VEC] = e.normalize(e.embed_clip_image(image)).tolist()
-            if index.DINO_VEC in weights:
-                vecs[index.DINO_VEC] = e.normalize(e.embed_dino_image(image)).tolist()
-            return vecs
-
-        vecs = await asyncio.to_thread(embed)
-        results = await asyncio.gather(*(
-            asyncio.to_thread(self._query, using, vec, fetch, flt) for using, vec in vecs.items()))
-
-        floor = {u: (min(p.score for p in pts) if pts else 0.0) for u, pts in zip(vecs, results)}
         total_w = sum(weights.values())
         fused: dict[int, dict] = {}
-        for using, pts in zip(vecs, results):
-            for p in pts:
-                e = fused.setdefault(p.payload["ImgID"], {"payload": p.payload, "per": {}})
-                e["per"][using] = p.score
-        for e in fused.values():
-            e["score"] = sum(w * e["per"].get(u, floor[u]) for u, w in weights.items()) / total_w
+        for vecs in queries:
+            results = await asyncio.gather(*(
+                asyncio.to_thread(self._query, using, vec, fetch, flt) for using, vec in vecs.items()))
+            floor = {u: (min(p.score for p in pts) if pts else 0.0) for u, pts in zip(vecs, results)}
+            per_img: dict[int, dict] = {}
+            for using, pts in zip(vecs, results):
+                for p in pts:
+                    e = per_img.setdefault(p.payload["ImgID"], {"payload": p.payload, "per": {}})
+                    e["per"][using] = p.score
+            for img_id, e in per_img.items():
+                e["score"] = sum(w * e["per"].get(u, floor[u]) for u, w in weights.items()) / total_w
+                if img_id not in fused or e["score"] > fused[img_id]["score"]:
+                    fused[img_id] = e
 
         by_item: dict[int, dict] = {}
         for e in sorted(fused.values(), key=lambda x: x["score"], reverse=True):
@@ -136,13 +126,14 @@ class ProductSearch:
             if iid not in by_item:
                 by_item[iid] = {"best": e, "matched": 0}
             by_item[iid]["matched"] += 1
-        ranked = sorted(by_item.items(), key=lambda kv: kv[1]["best"]["score"], reverse=True)[:top_k]
-        others = await asyncio.to_thread(self._other_images, [iid for iid, _ in ranked])
+        return sorted(by_item.items(), key=lambda kv: kv[1]["best"]["score"], reverse=True)[:top_k]
 
-        results_out = []
+    async def _format(self, ranked: list) -> list[dict]:
+        others = await asyncio.to_thread(self._other_images, [iid for iid, _ in ranked])
+        out = []
         for rank, (iid, v) in enumerate(ranked, 1):
             p = v["best"]["payload"]
-            results_out.append({
+            out.append({
                 "rank": rank, "item_id": iid, "item_code": p.get("ItemCode"),
                 "category_code": p.get("CategoryCode"),
                 "is_plain_gold": p.get("IsPlainGold"), "is_solitaire": p.get("IsSolitaire"),
@@ -154,6 +145,85 @@ class ProductSearch:
                 "best_image": _image_view(p, v["best"]["score"]),
                 "images": others.get(iid, []),
             })
+        return out
+
+    def _stored_vectors(self, item_id: int) -> list[dict[str, list]]:
+        """Vectors already indexed for a product's active images (no re-embedding)."""
+        flt = Filter(must=[FieldCondition(key="ItemID", match=MatchValue(value=item_id)),
+                           FieldCondition(key="is_active", match=MatchValue(value=True))])
+        pts, _ = self.client.scroll(config.PRODUCT_COLLECTION, scroll_filter=flt, limit=64,
+                                    with_payload=False, with_vectors=True)
+        return [dict(pt.vector) for pt in pts]
+
+    async def cross_category(self, image: Image.Image, targets: list[str], per_category: int,
+                             mode: str = "fusion", filters: SearchFilters | None = None,
+                             min_score: float | None = None) -> dict:
+        """Visually similar designs in each target category (e.g. a necklace photo -> matching earrings, rings).
+
+        The image is embedded once; each category is then ranked on its own so every category gets its
+        best `per_category` products instead of competing with the others for the top slots."""
+        if mode not in MODES:
+            raise ValueError(f"mode must be one of {MODES}")
+        weights = _weights(mode, None, None)
+
+        def embed() -> dict[str, list]:
+            e, vecs = self.embedder, {}
+            if index.CLIP_VEC in weights:
+                vecs[index.CLIP_VEC] = e.normalize(e.embed_clip_image(image)).tolist()
+            if index.DINO_VEC in weights:
+                vecs[index.DINO_VEC] = e.normalize(e.embed_dino_image(image)).tolist()
+            return vecs
+
+        vecs = await asyncio.to_thread(embed)
+        base = filters or SearchFilters()
+
+        async def one(category: str) -> dict:
+            flt = build_filter(SearchFilters(**{**base.__dict__, "category": category}))
+            ranked = await self._rank([vecs], weights, flt, per_category, min_score)
+            return {"category": category, "results": await self._format(ranked)}
+
+        groups = await asyncio.gather(*(one(c) for c in targets))
+        return {"mode": mode, "weights": weights, "embedding_model_version": config.EMBEDDING_MODEL_VERSION,
+                "per_category": per_category, "groups": list(groups)}
+
+    async def similar(self, item_id: int, top_k: int, mode: str = "fusion",
+                      filters: SearchFilters | None = None, min_score: float | None = None,
+                      clip_weight: float | None = None, dino_weight: float | None = None) -> dict | None:
+        """Products that look like an already-indexed product (itself excluded). None if it isn't indexed."""
+        if mode not in MODES:
+            raise ValueError(f"mode must be one of {MODES}")
+        weights = _weights(mode, clip_weight, dino_weight)
+        queries = await asyncio.to_thread(self._stored_vectors, item_id)
+        if not queries:
+            return None
+        queries = [{u: v[u] for u in weights if u in v} for v in queries]
+        flt = build_filter(filters or SearchFilters())
+        flt.must_not = [FieldCondition(key="ItemID", match=MatchValue(value=item_id))]
+        ranked = await self._rank(queries, weights, flt, top_k, min_score)
+        return {"item_id": item_id, "query_images": len(queries), "mode": mode, "weights": weights,
+                "embedding_model_version": config.EMBEDDING_MODEL_VERSION,
+                "total_returned": len(ranked), "results": await self._format(ranked)}
+
+    async def search(self, image: Image.Image, top_k: int, mode: str = "fusion",
+                     filters: SearchFilters | None = None, min_score: float | None = None,
+                     clip_weight: float | None = None, dino_weight: float | None = None) -> dict:
+        if mode not in MODES:
+            raise ValueError(f"mode must be one of {MODES}")
+        weights = _weights(mode, clip_weight, dino_weight)
+        flt = build_filter(filters or SearchFilters())
+
+        def embed() -> dict[str, list]:
+            e = self.embedder
+            vecs = {}
+            if index.CLIP_VEC in weights:
+                vecs[index.CLIP_VEC] = e.normalize(e.embed_clip_image(image)).tolist()
+            if index.DINO_VEC in weights:
+                vecs[index.DINO_VEC] = e.normalize(e.embed_dino_image(image)).tolist()
+            return vecs
+
+        vecs = await asyncio.to_thread(embed)
+        ranked = await self._rank([vecs], weights, flt, top_k, min_score)
+        results_out = await self._format(ranked)
         return {
             "score_type": "cosine similarity (" + ("+".join(weights) if len(weights) > 1 else next(iter(weights)))
                           + (", weighted mean" if len(weights) > 1 else "") + "); not a calibrated probability",

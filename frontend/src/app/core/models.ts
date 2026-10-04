@@ -33,6 +33,24 @@ export interface SearchResponse {
   image_filename?: string;
 }
 
+export interface CategoryGroup {
+  category: string;
+  results: ProductResult[];
+}
+
+export interface CrossCategoryResponse {
+  per_category: number;
+  groups: CategoryGroup[];
+  image_filename?: string;
+}
+
+export interface SimilarResponse {
+  item_id: number;
+  query_images: number;
+  total_returned: number;
+  results: ProductResult[];
+}
+
 export interface SearchParams {
   top_k: number;
   mode: RankMode;

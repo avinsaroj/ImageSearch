@@ -4,7 +4,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { catchError, of } from 'rxjs';
 
 import { Api, errorMessage } from '../../core/api';
-import { ProductResult, RankMode, SearchParams, SearchResponse, Tri } from '../../core/models';
+import { ProductResult, RankMode, SearchParams, SearchResponse, SimilarResponse, Tri } from '../../core/models';
 
 const DEFAULTS: SearchParams = {
   top_k: 12, mode: 'fusion', category: '', plain_gold: 'all', solitaire: 'all', valid: 'all',
@@ -41,6 +41,9 @@ export class SearchPage {
   protected readonly result = signal<SearchResponse | null>(null);
   protected readonly selected = signal<ProductResult | null>(null);
   protected readonly filtersOpen = signal(false);
+  protected readonly similar = signal<SimilarResponse | null>(null);
+  protected readonly similarLoading = signal(false);
+  protected readonly similarError = signal<string | null>(null);
 
   protected readonly activeFilters = computed(() => {
     const p = this.params();
@@ -85,7 +88,37 @@ export class SearchPage {
 
   @HostListener('document:keydown.escape')
   protected closeDialog(): void {
-    this.selected.set(null);
+    this.open(null);
+  }
+
+  /** Show a product in the dialog; any similar-product list belongs to the previous product, so drop it. */
+  protected open(r: ProductResult | null): void {
+    this.selected.set(r);
+    this.similar.set(null);
+    this.similarError.set(null);
+  }
+
+  /** Fetch the products most like `r` using its indexed images (same ranking model and filters as the search). */
+  protected findSimilar(r: ProductResult): void {
+    if (this.similarLoading()) return;
+    this.similarLoading.set(true);
+    this.similarError.set(null);
+    this.api.similar(r.item_id, this.params()).subscribe({
+      next: (res) => {
+        this.similar.set(res);
+        this.similarLoading.set(false);
+      },
+      error: (err) => {
+        this.similarError.set(errorMessage(err));
+        this.similarLoading.set(false);
+      },
+    });
+  }
+
+  /** Jump from a similar product to its own detail view and list its look-alikes. */
+  protected drillInto(r: ProductResult): void {
+    this.open(r);
+    this.findSimilar(r);
   }
 
   private setFile(f: File): void {

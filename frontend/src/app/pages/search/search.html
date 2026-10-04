@@ -107,7 +107,7 @@
       } @else {
         <div class="results">
           @for (r of res.results; track r.item_id) {
-            <article class="product" tabindex="0" (click)="selected.set(r)" (keydown.enter)="selected.set(r)">
+            <article class="product" tabindex="0" (click)="open(r)" (keydown.enter)="open(r)">
               <div class="thumb">
                 <img [src]="r.best_image.ImageURL" [alt]="r.item_code" loading="lazy" (error)="hideBroken($event)" />
                 <span class="rank">#{{ r.rank }}</span>
@@ -131,9 +131,9 @@
 </div>
 
 @if (selected(); as r) {
-  <div class="backdrop" (click)="selected.set(null)">
+  <div class="backdrop" (click)="open(null)">
     <div class="dialog" role="dialog" aria-modal="true" [attr.aria-label]="'Product ' + r.item_code" (click)="$event.stopPropagation()">
-      <button class="btn ghost close" type="button" aria-label="Close" (click)="selected.set(null)">✕</button>
+      <button class="btn ghost close" type="button" aria-label="Close" (click)="open(null)">✕</button>
       <div class="d-main">
         <img class="d-img" [src]="r.best_image.ImageURL" [alt]="r.item_code" />
         <div class="d-info">
@@ -153,9 +153,30 @@
           <p class="muted small">
             @for (s of spaces(r); track s.name; let last = $last) { {{ s.name }} {{ s.value | number: '1.3-3' }}{{ last ? '' : ' · ' }} }
           </p>
-          <a class="btn" [href]="r.best_image.ImageURL" target="_blank" rel="noopener">Open original image</a>
+          <div class="d-actions">
+            <button class="btn primary" type="button" [disabled]="similarLoading()" (click)="findSimilar(r)">
+              @if (similarLoading()) { <span class="spinner"></span> Finding… } @else { Find similar products }
+            </button>
+            <a class="btn" [href]="r.best_image.ImageURL" target="_blank" rel="noopener">Open original image</a>
+          </div>
         </div>
       </div>
+      @if (similarError(); as e) { <div class="alert error" role="alert">{{ e }}</div> }
+      @if (similar(); as sim) {
+        <h3 class="g-title">Similar to {{ r.item_code }} ({{ sim.total_returned }})</h3>
+        @if (!sim.results.length) {
+          <div class="alert info">No similar products matched. Try lowering the minimum similarity or clearing filters.</div>
+        } @else {
+          <div class="gallery similar">
+            @for (s of sim.results; track s.item_id) {
+              <figure tabindex="0" (click)="drillInto(s)" (keydown.enter)="drillInto(s)">
+                <img [src]="s.best_image.ImageURL" [alt]="s.item_code" loading="lazy" (error)="hideBroken($event)" />
+                <figcaption class="small"><strong>{{ s.item_code }}</strong> · {{ s.score | number: '1.3-3' }}</figcaption>
+              </figure>
+            }
+          </div>
+        }
+      }
       @if (r.images.length > 1) {
         <h3 class="g-title">All images ({{ r.images.length }})</h3>
         <div class="gallery">

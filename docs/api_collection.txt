@@ -1,0 +1,87 @@
+KISNA IMAGE SEARCH API
+======================
+Base URL : http://localhost:8000        (change to your server address)
+Admin    : every /sync/* call needs the header   X-Admin-Token: <ADMIN_API_TOKEN from .env>
+Bodies   : search/index calls are multipart/form-data; sync calls are JSON (Content-Type: application/json)
+
+
+SYSTEM
+------
+GET  /health
+
+
+CATALOG
+-------
+GET  /categories
+GET  /products/{item_id}
+GET  /products/{item_id}/images
+
+
+SEARCH
+------
+POST /search/image                      multipart/form-data
+    file          (file, required)      reference image
+    top_k         (int, default 10)
+    mode          fusion | clip | dino  (default fusion)
+    category      (text, optional)
+    plain_gold    all | yes | no        (optional)
+    solitaire     all | yes | no        (optional)
+    valid         all | yes | no        (optional)
+    franchise     all | yes | no        (optional)
+    item_codes    comma-separated codes (optional)
+    min_score     -1.0 .. 1.0           (optional)
+    clip_weight   >= 0                  (optional)
+    dino_weight   >= 0                  (optional)
+
+POST /search-image                      multipart/form-data   (legacy; text and/or image)
+    query         (text, optional)      at least one of query / file is required
+    file          (file, optional)
+    top_k         (int, default 10)
+    page          (int, default 1)
+    page_size     (int, default 10)
+    category      (text, optional)
+
+POST /index-image                       multipart/form-data   (legacy)
+    file          (file, required)
+    caption       (text, required)
+    category      (text, optional)
+    metal         (text, optional)
+    item_id       (text, optional)
+
+
+SYNC (admin, header X-Admin-Token required)
+-------------------------------------------
+GET  /sync/status
+GET  /sync/history?limit=50
+GET  /sync/failures?limit=200
+GET  /sync/scope
+
+POST /sync/preview                      count what a scope would cover, queues nothing
+    {"categories": [], "plain_gold": null, "solitaire": null, "valid": true,
+     "franchise": null, "search_text": null, "max_products": null}
+
+POST /sync/full                         rebuild the index (202)
+    {"confirm": true, "scope": {"valid": true}}
+
+POST /sync/incremental                  refresh saved scopes; also removes duplicate ItemCodes (202)
+    {}
+  or, to add a scope:
+    {"scope": {"categories": [], "valid": true}}
+
+POST /sync/retry-failed                 (202, no body)
+POST /sync/cancel                       stop the active job (no body)
+
+Scope fields: categories (list), plain_gold / solitaire / valid / franchise (true, false or null = any),
+              search_text (substring of item code or status remark, max 100 chars),
+              max_products (embed only the first N matches, for test runs)
+
+
+CURL EXAMPLES
+-------------
+curl http://localhost:8000/health
+
+curl -X POST http://localhost:8000/search/image -F "file=@ring.jpg" -F "top_k=10" -F "mode=fusion" -F "valid=yes"
+
+curl -X POST http://localhost:8000/sync/incremental -H "X-Admin-Token: YOUR_TOKEN" -H "Content-Type: application/json" -d "{}"
+
+curl -X POST http://localhost:8000/sync/cancel -H "X-Admin-Token: YOUR_TOKEN"

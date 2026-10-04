@@ -34,7 +34,7 @@ CREATE INDEX IF NOT EXISTS ix_images_url ON images(url);
 CREATE TABLE IF NOT EXISTS products (
     item_id INTEGER PRIMARY KEY, fingerprint TEXT NOT NULL, seen_at TEXT
 );
-CREATE TABLE IF NOT EXISTS item_codes (code TEXT PRIMARY KEY, item_id INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS item_codes (code TEXT PRIMARY KEY, item_id INTEGER NOT NULL, valid INTEGER);
 CREATE INDEX IF NOT EXISTS ix_item_codes_item ON item_codes(item_id);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
 """
@@ -56,6 +56,8 @@ def _conn() -> sqlite3.Connection:
         c.executescript(_SCHEMA)
         if "params" not in {r["name"] for r in c.execute("PRAGMA table_info(jobs)")}:
             c.execute("ALTER TABLE jobs ADD COLUMN params TEXT")  # existing state DBs predate job scopes
+        if "valid" not in {r["name"] for r in c.execute("PRAGMA table_info(item_codes)")}:
+            c.execute("ALTER TABLE item_codes ADD COLUMN valid INTEGER")  # claims saved before IsValid ranking
         _local.conn = c
     return c
 
@@ -290,17 +292,33 @@ def get_product_fingerprints(item_ids: list[int]) -> dict[int, str]:
     return {r["item_id"]: r["fingerprint"] for r in rows}
 
 
-def claim_item_codes(pairs: list[tuple[str, int]]) -> dict[int, int]:
-    """Give each ItemCode to the first ItemID that claims it. Returns {item_id: owner_item_id}.
+def _code_rank(valid, item_id: int) -> tuple:
+    """Who keeps a shared ItemCode: a valid product beats an invalid one, then the lowest ItemID."""
+    return (0 if valid else 1, item_id)
 
-    An owner whose code changed releases its old code; an item whose owner differs is a duplicate."""
-    owners: dict[int, int] = {}
+
+def claim_item_codes(claims: list[tuple[str, int, bool | None]]) -> tuple[dict[int, int], set[int]]:
+    """Give each ItemCode to its best claimant (see _code_rank).
+
+    Returns ({item_id: owner_item_id}, displaced) - an item whose owner differs is a duplicate, and
+    `displaced` holds earlier owners that lost their code to a better claimant in this call.
+    An owner whose code changed releases its old code."""
+    displaced: set[int] = set()
     with _tx() as c:
-        for code, item_id in pairs:
+        for code, item_id, valid in claims:
             c.execute("DELETE FROM item_codes WHERE item_id=? AND code!=?", (item_id, code))
-            c.execute("INSERT OR IGNORE INTO item_codes(code,item_id) VALUES(?,?)", (code, item_id))
+            row = c.execute("SELECT item_id, valid FROM item_codes WHERE code=?", (code,)).fetchone()
+            v = None if valid is None else int(valid)
+            if row is None or row["item_id"] == item_id:
+                c.execute("INSERT INTO item_codes(code,item_id,valid) VALUES(?,?,?) "
+                          "ON CONFLICT(code) DO UPDATE SET valid=excluded.valid", (code, item_id, v))
+            elif _code_rank(valid, item_id) < _code_rank(row["valid"], row["item_id"]):
+                c.execute("UPDATE item_codes SET item_id=?, valid=? WHERE code=?", (item_id, v, code))
+                displaced.add(row["item_id"])
+        owners = {}
+        for code, item_id, _ in claims:
             owners[item_id] = c.execute("SELECT item_id FROM item_codes WHERE code=?", (code,)).fetchone()[0]
-    return owners
+    return owners, displaced
 
 
 def clear_item_codes() -> None:

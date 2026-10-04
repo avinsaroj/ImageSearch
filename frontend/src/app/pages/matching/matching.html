@@ -1,0 +1,128 @@
+<header class="page-head">
+  <h1>Matching set</h1>
+  <p class="muted">Upload one piece (for example a necklace) and see visually similar designs in other categories (earrings, rings, bracelets…).</p>
+</header>
+
+<section class="card query">
+  <div class="drop-col">
+    @if (preview(); as src) {
+      <div class="preview">
+        <img [src]="src" [alt]="file()?.name" />
+        <div class="preview-bar"><span class="name">{{ file()?.name }}</span><button class="btn ghost" type="button" (click)="clear()">Remove</button></div>
+      </div>
+    } @else {
+      <label class="drop" [class.over]="dragging()" (dragover)="$event.preventDefault(); dragging.set(true)" (dragleave)="dragging.set(false)" (drop)="onDrop($event)">
+        <input type="file" accept="image/*" class="visually-hidden" (change)="onPick($event)" />
+        <span class="big" aria-hidden="true">📷</span>
+        <span><strong>Drop a product photo here</strong>, click to browse, or paste (Ctrl+V)</span>
+      </label>
+    }
+  </div>
+
+  <div class="controls">
+    <div class="field">
+      <label for="src">This product is a</label>
+      <select id="src" [value]="source()" (change)="setSource($any($event.target).value)">
+        <option value="">Select category (optional)</option>
+        @for (c of categories()?.categories ?? []; track c.code) {
+          <option [value]="c.code" [selected]="source() === c.code">{{ c.code }}</option>
+        }
+      </select>
+    </div>
+
+    <div class="field">
+      <span class="label">Find matching designs in</span>
+      <div class="checks" role="group" aria-label="Target categories">
+        @for (c of choices(); track c) {
+          <label class="check" [class.on]="targets().includes(c)">
+            <input type="checkbox" [checked]="targets().includes(c)" (change)="toggle(c)" /> {{ c }}
+          </label>
+        }
+      </div>
+    </div>
+
+    <div class="grid two">
+      <div class="field">
+        <label for="per">Designs per category: <strong>{{ perCategory() }}</strong></label>
+        <input id="per" type="range" min="2" max="20" step="1" [value]="perCategory()" (input)="perCategory.set(+$any($event.target).value)" />
+      </div>
+      <div class="field">
+        <span class="label">Ranking model</span>
+        <div class="seg" role="group" aria-label="Ranking model">
+          @for (m of modes; track m.value) {
+            <button type="button" [attr.aria-pressed]="mode() === m.value" (click)="mode.set(m.value)">{{ m.label }}</button>
+          }
+        </div>
+      </div>
+    </div>
+
+    <div class="field">
+      <span class="label">Items</span>
+      <div class="seg" role="group" aria-label="Items">
+        @for (t of tri; track t.value) {
+          <button type="button" [attr.aria-pressed]="valid() === t.value" (click)="valid.set(t.value)">{{ t.label }}</button>
+        }
+      </div>
+    </div>
+
+    <button class="btn primary go" type="button" [disabled]="!file() || !targets().length || loading()" (click)="search()">
+      @if (loading()) { <span class="spinner"></span> Searching… } @else { Find matching designs }
+    </button>
+    @if (file() && !targets().length) { <p class="muted small">Tick at least one category to search in.</p> }
+  </div>
+</section>
+
+@if (error(); as e) { <div class="alert error" role="alert">{{ e }}</div> }
+
+@if (result(); as res) {
+  <section aria-live="polite">
+    @if (!shown().length) {
+      <div class="alert info">No similar designs found in the selected categories.</div>
+    }
+    @for (g of shown(); track g.category) {
+      <h2 class="cat-title">{{ g.category }} <span class="chip yes">{{ g.results.length }}</span></h2>
+      <div class="results">
+        @for (r of g.results; track r.item_id) {
+          <article class="product" tabindex="0" (click)="selected.set(r)" (keydown.enter)="selected.set(r)">
+            <div class="thumb">
+              <img [src]="r.best_image.ImageURL" [alt]="r.item_code" loading="lazy" (error)="hideBroken($event)" />
+              <span class="score">{{ r.score | number: '1.3-3' }}</span>
+            </div>
+            <div class="body"><div class="code">{{ r.item_code }}</div></div>
+          </article>
+        }
+      </div>
+    }
+    @if (empty().length) {
+      <p class="muted small">Nothing found in: {{ emptyNames() }}</p>
+    }
+  </section>
+}
+
+@if (selected(); as r) {
+  <div class="backdrop" (click)="selected.set(null)">
+    <div class="dialog" role="dialog" aria-modal="true" [attr.aria-label]="'Product ' + r.item_code" (click)="$event.stopPropagation()">
+      <button class="close" type="button" aria-label="Close" (click)="selected.set(null)">✕</button>
+      <div class="d-main">
+        <img class="d-img" [src]="r.best_image.ImageURL" [alt]="r.item_code" />
+        <div class="d-info">
+          <h2>{{ r.item_code }}</h2>
+          <dl>
+            <dt>Category</dt><dd>{{ r.category_code }}</dd>
+            <dt>ItemID</dt><dd>{{ r.item_id }}</dd>
+            <dt>Cosine similarity</dt><dd>{{ r.score | number: '1.4-4' }}</dd>
+          </dl>
+          <a class="btn" [href]="r.best_image.ImageURL" target="_blank" rel="noopener">Open original image</a>
+        </div>
+      </div>
+      @if (r.images.length > 1) {
+        <h3 class="g-title">All images ({{ r.images.length }})</h3>
+        <div class="gallery">
+          @for (img of r.images; track img.ImgID) {
+            <figure><img [src]="img.ImageURL" [alt]="'Image ' + img.ImgID" loading="lazy" (error)="hideBroken($event)" /></figure>
+          }
+        </div>
+      }
+    </div>
+  </div>
+}

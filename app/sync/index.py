@@ -180,5 +180,20 @@ def delete_images(c: QdrantClient, collection: str, img_ids: list[int]) -> None:
     c.delete(collection_name=collection, points_selector=[point_id(i) for i in img_ids], wait=True)
 
 
+def indexed_items(c: QdrantClient, collection: str) -> dict[int, tuple[str | None, bool | None]]:
+    """{ItemID: (normalised ItemCode, IsValid)} for every product that has points in the collection."""
+    out: dict[int, tuple[str | None, bool | None]] = {}
+    offset = None
+    while True:
+        pts, offset = c.scroll(collection, limit=5000, offset=offset, with_vectors=False,
+                               with_payload=["ItemID", "ItemCode", "item_code_norm", "IsValid"])
+        for pt in pts:
+            pl = pt.payload or {}
+            code = pl.get("item_code_norm") or (str(pl["ItemCode"]).strip().upper() if pl.get("ItemCode") else None)
+            out[int(pl["ItemID"])] = (code, pl.get("IsValid"))
+        if offset is None:
+            return out
+
+
 def delete_item(c: QdrantClient, collection: str, item_id: int) -> None:
     c.delete(collection_name=collection, points_selector=FilterSelector(filter=_item_filter(item_id)), wait=True)
