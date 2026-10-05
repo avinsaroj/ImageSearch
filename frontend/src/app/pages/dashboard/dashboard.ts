@@ -5,11 +5,12 @@ import { Subject, catchError, interval, map, merge, of, startWith, switchMap } f
 
 import { Api, errorMessage } from '../../core/api';
 import { SyncStatus } from '../../core/models';
+import { Icon } from '../../shared/icon';
 import { TokenBox } from '../../shared/token-box';
 
 @Component({
   selector: 'app-dashboard',
-  imports: [DecimalPipe, TokenBox],
+  imports: [DecimalPipe, Icon, TokenBox],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
 })

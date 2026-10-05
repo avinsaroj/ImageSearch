@@ -4,6 +4,8 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { catchError, of } from 'rxjs';
 
 import { Api, errorMessage } from '../../core/api';
+import { Icon } from '../../shared/icon';
+import { ProductDialog } from '../../shared/product-dialog';
 import { ProductResult, RankMode, SearchParams, SearchResponse, SimilarResponse, Tri } from '../../core/models';
 
 const DEFAULTS: SearchParams = {
@@ -13,7 +15,7 @@ const DEFAULTS: SearchParams = {
 
 @Component({
   selector: 'app-search',
-  imports: [DecimalPipe],
+  imports: [DecimalPipe, Icon, ProductDialog],
   templateUrl: './search.html',
   styleUrl: './search.scss',
 })
@@ -41,6 +43,7 @@ export class SearchPage {
   protected readonly result = signal<SearchResponse | null>(null);
   protected readonly selected = signal<ProductResult | null>(null);
   protected readonly filtersOpen = signal(false);
+  protected readonly skeletons = Array.from({ length: 8 });
   protected readonly similar = signal<SimilarResponse | null>(null);
   protected readonly similarLoading = signal(false);
   protected readonly similarError = signal<string | null>(null);
@@ -61,6 +64,11 @@ export class SearchPage {
 
   protected set<K extends keyof SearchParams>(key: K, value: SearchParams[K]): void {
     this.params.update((p) => ({ ...p, [key]: value }));
+  }
+
+  protected toggleFilters(): void {
+    this.filtersOpen.update((v) => !v);
+    if (this.filtersOpen()) setTimeout(() => document.querySelector('.filters')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
   }
 
   protected reset(): void {

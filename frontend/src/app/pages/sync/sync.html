@@ -1,7 +1,10 @@
 <div class="page">
   <header class="page-head">
-    <h1>Sync admin</h1>
-    <p>Run and monitor synchronization from SQL Server. Jobs run in the worker, so closing this page never interrupts them.</p>
+    <div>
+      <div class="eyebrow">Administration</div>
+      <h1>Sync admin</h1>
+      <p>Run and monitor synchronization from SQL Server. Jobs run in the worker, so closing this page never interrupts them.</p>
+    </div>
   </header>
 
   @if (needsToken()) {
@@ -23,18 +26,19 @@
           <div class="live-actions">
             <span class="muted small">{{ j.stage }}</span>
             <button class="btn danger" type="button" [disabled]="busy() !== null" (click)="cancelJob()">
-              @if (busy() === 'cancel') { <span class="spinner"></span> } ⏹ Stop job
+              @if (busy() === 'cancel') { <span class="spinner"></span> } <app-icon name="stop" /> Stop job
             </button>
           </div>
         </div>
         <div class="progress" role="progressbar" [attr.aria-valuenow]="progress()" aria-valuemin="0" aria-valuemax="100"><i [style.width.%]="progress()"></i></div>
         <p class="muted small">Images processed {{ (j.counters.processed ?? 0) | number }} / {{ (j.counters.to_process ?? 0) | number }}</p>
-        <div class="mini">
-          <div><span>Indexed</span><b>{{ j.counters.indexed ?? 0 | number }}</b></div>
-          <div><span>Reused</span><b>{{ j.counters.reused ?? 0 | number }}</b></div>
-          <div><span>Failed</span><b [class.bad-text]="(j.counters.failed ?? 0) > 0">{{ j.counters.failed ?? 0 | number }}</b></div>
-          <div><span>Products scanned</span><b>{{ j.counters.products_scanned ?? 0 | number }}</b></div>
-          <div><span>Images scanned</span><b>{{ j.counters.images_scanned ?? 0 | number }}</b></div>
+        <div class="grid kpis">
+          <div class="stat"><span>Indexed</span><b>{{ j.counters.indexed ?? 0 | number }}</b></div>
+          <div class="stat"><span>Reused</span><b>{{ j.counters.reused ?? 0 | number }}</b></div>
+          <div class="stat" [class.bad]="(j.counters.failed ?? 0) > 0"><span>Failed</span><b>{{ j.counters.failed ?? 0 | number }}</b></div>
+          <div class="stat"><span>Products scanned</span><b>{{ j.counters.products_scanned ?? 0 | number }}</b></div>
+          <div class="stat"><span>Images scanned</span><b>{{ j.counters.images_scanned ?? 0 | number }}</b></div>
+          @if (j.counters.duplicates) { <div class="stat"><span>Duplicates removed</span><b>{{ j.counters.duplicates | number }}</b></div> }
         </div>
       } @else {
         <div class="alert ok">No sync job running.</div>
@@ -49,12 +53,12 @@
     <section class="card stack">
       <div>
         <h2>Add to index</h2>
-        <p class="muted small">Embeds the selected products into the one live index. Everything already indexed stays searchable, search never switches collections, and the Search page narrows results by its own filters.</p>
+        <p class="muted small head-note">Embeds the selected products into the one live index. Everything already indexed stays searchable, search never switches collections, and the Search page narrows results by its own filters.</p>
       </div>
 
       <div class="field">
         <span class="label">Categories {{ scope().categories.length ? '(' + scope().categories.length + ' selected)' : '· all' }}</span>
-        <div class="cat-list">
+        <div class="pills scroll">
           @for (c of categories()?.categories ?? []; track c.code) {
             <button type="button" class="pill" [attr.aria-pressed]="scope().categories.includes(c.code)" (click)="toggleCategory(c.code)">{{ c.code }}</button>
           } @empty {
@@ -108,7 +112,7 @@
     <section class="card stack">
       <div>
         <h2>Refresh index</h2>
-        <p class="muted small">Re-scans everything added so far for new and changed images, and deactivates images deleted in SQL Server. Also runs automatically every day at {{ status()?.scheduler?.daily_at ?? '…' }}.</p>
+        <p class="muted small head-note">Re-scans everything added so far for new and changed images, and deactivates images deleted in SQL Server. Also runs automatically every day at {{ status()?.scheduler?.daily_at ?? '…' }}.</p>
       </div>
       <div>
         <span class="label">Added so far</span>

@@ -72,6 +72,7 @@ export interface JobCounters {
   products_scanned?: number;
   images_scanned?: number;
   images_removed?: number;
+  duplicates?: number;
   to_process?: number;
   processed?: number;
   indexed?: number;

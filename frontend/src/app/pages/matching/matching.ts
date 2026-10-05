@@ -3,14 +3,16 @@ import { Component, computed, effect, HostListener, inject, signal } from '@angu
 import { toSignal } from '@angular/core/rxjs-interop';
 import { catchError, of } from 'rxjs';
 import { Api, errorMessage } from '../../core/api';
-import { CrossCategoryResponse, ProductResult, RankMode, Tri } from '../../core/models';
+import { CrossCategoryResponse, ProductResult, RankMode, SearchParams, SimilarResponse, Tri } from '../../core/models';
+import { Icon } from '../../shared/icon';
+import { ProductDialog } from '../../shared/product-dialog';
 
 /** Categories ticked by default once the real category codes load (matched by name, case-insensitive). */
 const DEFAULT_TARGETS = ['EARRING', 'RING', 'BRACELET', 'BANGLE', 'PENDANT'];
 
 @Component({
   selector: 'app-matching',
-  imports: [DecimalPipe],
+  imports: [DecimalPipe, Icon, ProductDialog],
   templateUrl: './matching.html',
   styleUrl: './matching.scss',
 })
@@ -40,6 +42,10 @@ export class MatchingPage {
   protected readonly error = signal<string | null>(null);
   protected readonly result = signal<CrossCategoryResponse | null>(null);
   protected readonly selected = signal<ProductResult | null>(null);
+  protected readonly similar = signal<SimilarResponse | null>(null);
+  protected readonly similarLoading = signal(false);
+  protected readonly similarError = signal<string | null>(null);
+  protected readonly skeletons = Array.from({ length: 10 });
 
   /** Every category except the one the uploaded product belongs to. */
   protected readonly choices = computed(() =>
@@ -93,7 +99,39 @@ export class MatchingPage {
 
   @HostListener('document:keydown.escape')
   protected closeDialog(): void {
-    this.selected.set(null);
+    this.open(null);
+  }
+
+  /** Show a product in the dialog; a similar-product list belongs to the previous product, so drop it. */
+  protected open(r: ProductResult | null): void {
+    this.selected.set(r);
+    this.similar.set(null);
+    this.similarError.set(null);
+  }
+
+  protected findSimilar(r: ProductResult): void {
+    if (this.similarLoading()) return;
+    this.similarLoading.set(true);
+    this.similarError.set(null);
+    const params: SearchParams = {
+      top_k: 12, mode: this.mode(), category: '', plain_gold: 'all', solitaire: 'all', valid: this.valid(),
+      franchise: 'all', item_codes: '', min_score: 0,
+    };
+    this.api.similar(r.item_id, params).subscribe({
+      next: (res) => {
+        this.similar.set(res);
+        this.similarLoading.set(false);
+      },
+      error: (err) => {
+        this.similarError.set(errorMessage(err));
+        this.similarLoading.set(false);
+      },
+    });
+  }
+
+  protected drillInto(r: ProductResult): void {
+    this.open(r);
+    this.findSimilar(r);
   }
 
   private setFile(f: File): void {

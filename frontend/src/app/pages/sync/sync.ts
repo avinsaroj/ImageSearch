@@ -5,6 +5,7 @@ import { Observable, Subject, catchError, interval, map, merge, of, startWith, s
 
 import { Api, errorMessage } from '../../core/api';
 import { FailedImage, Job, ScopeList, ScopePreview, SyncScope, SyncStatus } from '../../core/models';
+import { Icon } from '../../shared/icon';
 import { TokenBox } from '../../shared/token-box';
 
 type Tab = 'failed' | 'history';
@@ -17,7 +18,7 @@ const EMPTY_SCOPE: SyncScope = {
 
 @Component({
   selector: 'app-sync',
-  imports: [DecimalPipe, TokenBox],
+  imports: [DecimalPipe, Icon, TokenBox],
   templateUrl: './sync.html',
   styleUrl: './sync.scss',
 })

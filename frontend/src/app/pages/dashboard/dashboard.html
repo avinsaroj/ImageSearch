@@ -1,10 +1,11 @@
 <div class="page">
-  <header class="page-head head-row">
+  <header class="page-head">
     <div>
+      <div class="eyebrow">Administration</div>
       <h1>Index dashboard</h1>
       <p>Products, images and vectors are different counts: a product has several images, and each indexed image is one vector in Qdrant.</p>
     </div>
-    <button class="btn" type="button" (click)="reload()">↻ Refresh</button>
+    <button class="btn" type="button" (click)="reload()"><app-icon name="refresh" /> Refresh</button>
   </header>
 
   @if (needsToken()) {
@@ -15,11 +16,11 @@
 
   @if (status(); as s) {
     <section class="grid kpis">
-      <div class="card kpi"><span class="label">Products</span><strong>{{ fmt(s.sql_server.products) }}</strong><small>SQL Server</small></div>
-      <div class="card kpi"><span class="label">Images</span><strong>{{ fmt(s.sql_server.images) }}</strong><small>SQL Server</small></div>
-      <div class="card kpi"><span class="label">Indexed</span><strong>{{ fmt(s.images.indexed) }}</strong><small>images embedded</small></div>
-      <div class="card kpi"><span class="label">Pending</span><strong>{{ fmt(s.images.pending) }}</strong><small>waiting to process</small></div>
-      <div class="card kpi" [class.bad]="s.images.failed > 0"><span class="label">Failed</span><strong>{{ fmt(s.images.failed) }}</strong><small>see Sync admin</small></div>
+      <div class="stat"><span>Products</span><b>{{ fmt(s.sql_server.products) }}</b><small>SQL Server</small></div>
+      <div class="stat"><span>Images</span><b>{{ fmt(s.sql_server.images) }}</b><small>SQL Server</small></div>
+      <div class="stat"><span>Indexed</span><b>{{ fmt(s.images.indexed) }}</b><small>images embedded</small></div>
+      <div class="stat"><span>Pending</span><b>{{ fmt(s.images.pending) }}</b><small>waiting to process</small></div>
+      <div class="stat" [class.bad]="s.images.failed > 0"><span>Failed</span><b>{{ fmt(s.images.failed) }}</b><small>see Sync admin</small></div>
     </section>
 
     @if (s.sql_server.error) {
@@ -34,20 +35,20 @@
       </section>
     }
 
-    <section class="grid kpis three">
-      <div class="card kpi">
-        <span class="label">Qdrant</span>
-        <strong [class.ok]="s.qdrant.status === 'ok'" [class.bad-text]="s.qdrant.status !== 'ok'">{{ s.qdrant.status }}</strong>
+    <section class="grid status-row">
+      <div class="stat">
+        <span>Qdrant</span>
+        <b [class.ok-text]="s.qdrant.status === 'ok'" [class.bad-text]="s.qdrant.status !== 'ok'">{{ s.qdrant.status }}</b>
         <small>{{ fmt(s.qdrant.points) }} vectors</small>
       </div>
-      <div class="card kpi">
-        <span class="label">Sync</span>
-        <strong>{{ s.current_job ? s.current_job.kind + ' running' : 'Idle' }}</strong>
+      <div class="stat">
+        <span>Sync</span>
+        <b>{{ s.current_job ? s.current_job.kind + ' running' : 'Idle' }}</b>
         <small>{{ s.current_job?.stage ?? '' }}</small>
       </div>
-      <div class="card kpi">
-        <span class="label">Last successful sync</span>
-        <strong class="sm">{{ when(s.last_success?.finished_at) }}</strong>
+      <div class="stat">
+        <span>Last successful sync</span>
+        <b class="sm">{{ when(s.last_success?.finished_at) }}</b>
         <small>{{ s.last_success?.kind ?? '' }}</small>
       </div>
     </section>

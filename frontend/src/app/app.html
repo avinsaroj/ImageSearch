@@ -1,22 +1,29 @@
 <header class="topbar">
   <a routerLink="/search" aria-label="Kisna Image Search"><img class="logo" src="kisna-logo.png" alt="Kisna" width="345" height="69" /></a>
-  <span class="product">Image Search</span>
-  <i class="dot" [class.on]="online() === true" [class.off]="online() === false" [attr.title]="online() ? 'API connected' : 'API unreachable'"></i>
+  <span class="app-name">Image Search</span>
+  <span class="conn" [attr.title]="online() ? 'API connected' : 'API unreachable'">
+    <i class="dot" [class.on]="online() === true" [class.off]="online() === false"></i>
+  </span>
 </header>
 
 <div class="shell">
   <aside class="side">
     <a class="brand" routerLink="/search">
       <img class="logo" src="kisna-logo.png" alt="Kisna" width="345" height="69" />
-      <span class="product">Image Search<small>Find similar jewellery</small></span>
+      <span class="app-name">Image Search<small>Visual product discovery</small></span>
     </a>
 
     <nav aria-label="Main">
-      @for (n of nav; track n.path) {
-        <a [routerLink]="n.path" routerLinkActive="active">
-          <span class="ico" aria-hidden="true">{{ n.icon }}</span>
-          <span class="lbl">{{ n.label }}</span>
-        </a>
+      @for (g of nav; track g.title) {
+        <div class="group">
+          <span class="group-title">{{ g.title }}</span>
+          @for (n of g.items; track n.path) {
+            <a [routerLink]="n.path" routerLinkActive="active">
+              <app-icon [name]="n.icon" />
+              <span class="lbl">{{ n.label }}</span>
+            </a>
+          }
+        </div>
       }
     </nav>
 
@@ -25,8 +32,8 @@
         <i class="dot" [class.on]="online() === true" [class.off]="online() === false"></i>
         {{ online() === null ? 'Checking API…' : online() ? 'API connected' : 'API unreachable' }}
       </div>
-      <button class="btn ghost small-btn" (click)="tokenOpen.set(!tokenOpen())" [attr.aria-expanded]="tokenOpen()">
-        🔑 Admin token{{ auth.token() ? ' ✓' : '' }}
+      <button class="btn sm" type="button" (click)="tokenOpen.set(!tokenOpen())" [attr.aria-expanded]="tokenOpen()">
+        <app-icon name="key" /> Admin token{{ auth.token() ? ' ✓' : '' }}
       </button>
       @if (tokenOpen()) {
         <div class="token">
