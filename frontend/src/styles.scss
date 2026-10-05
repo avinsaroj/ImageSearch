@@ -291,8 +291,19 @@ dl.facts dd { margin: 0; font-weight: 700; word-break: break-word; }
   body { font-size: 14.5px; }
   .card { padding: 16px; }
   .result-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .dialog { padding: 18px; border-radius: 16px; }
-  .d-info h2 { font-size: 1.3rem; padding-right: 36px; }
+  .backdrop { padding: 0; place-items: end center; }
+  .dialog {
+    width: 100%; max-height: 94dvh; padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+    border-radius: 18px 18px 0 0; border-bottom: 0;
+    .close { position: absolute; top: 10px; right: 10px; float: none; margin: 0; }
+  }
+  .d-main { padding-top: 6px; }
+  .d-img { max-height: 260px; }
+  .d-info { min-width: 0; }
+  .d-info h2 { font-size: 1.3rem; padding-right: 44px; }
+  .d-actions { grid-template-columns: 1fr; }
+  .gallery { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .dialog h3 { margin-top: 18px; padding-top: 14px; }
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) {
